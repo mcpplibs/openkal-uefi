@@ -1,0 +1,32 @@
+# openkal on UEFI Boot Services.
+#
+# ⚠️ THE TARGET IS `x86_64-windows-gnu`, AND THAT IS NOT A WORKAROUND.
+#
+# A UEFI application is PE/COFF with subsystem 10, entered through the Microsoft
+# x64 calling convention. Both are properties this toolchain already has, so
+# firmware function pointers are called directly rather than through per-call
+# annotations.
+#
+# The first analysis of this backend concluded that mcpp would need a new
+# "PE freestanding" target before a UEFI application could exist. Measured: it
+# does not. The three link flags below produce
+# `IMAGE_SUBSYSTEM_EFI_APPLICATION (0xA)` with no DLL imports, which is what
+# firmware loads.
+[package]
+namespace   = "mcpplibs"
+name        = "openkal-uefi"
+version     = "0.1.0"
+description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+repo        = "https://github.com/mcpplibs/openkal-uefi"
+
+[dependencies]
+openkal = "0.5.1"
+
+[build]
+flags = [
+  { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti",
+                                 "-fno-stack-protector",
+                                 "-fno-asynchronous-unwind-tables"] },
+]

@@ -1,0 +1,15 @@
+[package]
+name    = "hello"
+version = "0.1.0"
+
+[build]
+target  = "x86_64-windows-gnu"
+# ⚠️ The three that make this an application firmware will load, rather than a
+# Windows one. `-nostdlib` removes the C runtime and the default import
+# libraries; `--subsystem,10` is EFI_APPLICATION; the entry point is the one
+# UEFI calls, not `mainCRTStartup`.
+ldflags = ["-nostdlib", "-Wl,--subsystem,10", "-Wl,-e,efi_main"]
+
+[dependencies]
+openkal      = "0.5.1"
+openkal-uefi = { path = "../.." }
