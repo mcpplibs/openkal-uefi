@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: boots under OVMF as BOOTX64.EFI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      MCPP_VERSION: 2026.8.20.2
+      XLINGS_VERSION: v2026.8.17.2
+      XLINGS_NON_INTERACTIVE: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xlings
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Install mcpp
+        run: |
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp --version
+          mcpp self config --mirror GLOBAL
+
+      - name: Install OVMF and qemu
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
+
+      - name: The example is a real EFI application
+        run: |
+          set -euo pipefail
+          cd examples/hello
+          mcpp build
+          EXE=$(find target -name "hello.exe" | head -1)
+          RO=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-llvm/*/bin/llvm-readobj | head -1)
+          # ⚠️ Subsystem 10 is what makes firmware load it. A Windows console
+          # subsystem would build, link and never be executed by UEFI.
+          "$RO" --file-headers "$EXE" | grep -q "IMAGE_SUBSYSTEM_EFI_APPLICATION"
+          # And no import table: a DLL dependency cannot be satisfied by firmware.
+          OD=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-llvm/*/bin/llvm-objdump | head -1)
+          if "$OD" -p "$EXE" | grep -qi "DLL Name"; then
+            "$OD" -p "$EXE" | grep -i -A2 "DLL Name"; echo "unexpected DLL import"; exit 1
+          fi
+
+      - name: It boots under OVMF and prints
+        run: |
+          set -euo pipefail
+          cd examples/hello
+          EXE=$(find target -name "hello.exe" | head -1)
+          mkdir -p esp/EFI/BOOT && cp "$EXE" esp/EFI/BOOT/BOOTX64.EFI
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
+          timeout 90 qemu-system-x86_64 -machine q35 -m 256 -display none \
+            -serial file:uefi.log \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive if=pflash,format=raw,file=vars.fd \
+            -drive format=raw,file=fat:rw:esp -net none || true
+          cat uefi.log | tr -d "\\000" | head -40
+          grep -q "hello from openkal over UEFI" uefi.log
+          grep -q "pool ok" uefi.log
