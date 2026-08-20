@@ -67,12 +67,25 @@ jobs:
           cd examples/hello
           mcpp build
           EXE=$(find target -name "hello.exe" | head -1)
-          RO=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-llvm/*/bin/llvm-readobj | head -1)
+
+          # ⚠️ THE TOOLCHAIN THAT BUILT THE IMAGE, NOT LLVM.
+          #
+          # This target resolves to mingw-cross-gcc, so on a machine that has
+          # never built anything else there is no LLVM to borrow `llvm-readobj`
+          # from — the previous version of this step globbed for one and died on
+          # `ls: cannot access .../xim-x-llvm/*/bin/llvm-readobj`, AFTER the
+          # build had succeeded. The verification tool has to come from the same
+          # place as the compiler, or the check is only available on machines
+          # that happen to have another one.
+          OD=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-mingw-cross-gcc/*/bin/x86_64-w64-mingw32-objdump | head -1)
+          test -x "$OD"
+
           # ⚠️ Subsystem 10 is what makes firmware load it. A Windows console
-          # subsystem would build, link and never be executed by UEFI.
-          "$RO" --file-headers "$EXE" | grep -q "IMAGE_SUBSYSTEM_EFI_APPLICATION"
+          # subsystem would build, link, and never be executed by UEFI.
+          # Measured spelling from this objdump: `Subsystem  0000000a  (EFI application)`.
+          "$OD" -p "$EXE" | grep -qE 'Subsystem[[:space:]]+0000000a'
+
           # And no import table: a DLL dependency cannot be satisfied by firmware.
-          OD=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-llvm/*/bin/llvm-objdump | head -1)
           if "$OD" -p "$EXE" | grep -qi "DLL Name"; then
             "$OD" -p "$EXE" | grep -i -A2 "DLL Name"; echo "unexpected DLL import"; exit 1
           fi
