@@ -22,7 +22,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-uefi"
 
 [dependencies]
-openkal = "0.5.1"
+openkal = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-closure" }
 
 [build]
 flags = [
