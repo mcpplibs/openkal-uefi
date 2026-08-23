@@ -11,5 +11,5 @@ target  = "x86_64-windows-gnu"
 ldflags = ["-nostdlib", "-Wl,--subsystem,10", "-Wl,-e,efi_main"]
 
 [dependencies]
-openkal      = "0.5.1"
+openkal      = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-closure" }
 openkal-uefi = { path = "../.." }
