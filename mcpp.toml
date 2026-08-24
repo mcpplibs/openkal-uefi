@@ -32,7 +32,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-uefi"
 
 [dependencies]
-openkal = "0.6.0"
+openkal = "0.7.0"
 
 [build]
 flags = [
