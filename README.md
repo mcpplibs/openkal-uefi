@@ -43,6 +43,16 @@ application is the only thing running, and an interface provided in part would
 be worse than one provided not at all — `import openkal.process;` does not
 resolve, which is the honest answer rather than a set of calls that always fail.
 
+The five interfaces version 0.8 adds are absent by the same rule. UEFI has no
+process model to copy an address space within, so `space` is not provided; no
+second context to bound a wait against, so `timeout` is not; and while Boot
+Services do expose a network stack, this backend forwards only the protocols
+listed above, so `net` and `datagram` are not. `terminal` is absent because
+`SIMPLE_TEXT_OUTPUT_PROTOCOL` has no mode to read or set.
+
+Clause 6.1 makes each absence a link-time absence, so a program requiring one of
+them is refused when it is built rather than when it runs.
+
 ## The three places this is not forwarding
 
 **Text.** openkal streams carry bytes; UEFI's console takes UCS-2 and treats a
