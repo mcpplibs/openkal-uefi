@@ -11,5 +11,15 @@ target  = "x86_64-windows-gnu"
 ldflags = ["-nostdlib", "-Wl,--subsystem,10", "-Wl,-e,efi_main"]
 
 [dependencies]
-openkal = "0.7.0"
+# ⚠️ THE FORM MUST MATCH THE ONE THE IMPLEMENTATION USES, not merely the
+# version. mcpp refuses a graph in which one package reaches a dependency by
+# version and another by git:
+#
+#     dependency 'mcpplibs.openkal' is requested as both a version dep
+#     (by 'hello') and a git dep (by 'mcpplibs.openkal-uefi@path').
+#
+# That is the right refusal --- two forms can name two different trees --- and
+# it means an example inside a repository follows that repository's own
+# declaration while a change is in flight.
+openkal = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-0.8" }
 openkal-uefi = { path = "../.." }
