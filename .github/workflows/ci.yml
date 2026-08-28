@@ -191,10 +191,17 @@ jobs:
           # a graph in which one package reaches a dependency by version and
           # another by path, so substituting only the root leaves the build
           # refusing for a second reason instead of the first.
-          sed -i 's|^openkal = .*$|openkal = { path = ".spec" }|' mcpp.toml
-          sed -i 's|^openkal = .*$|openkal = { path = "../../.spec" }|' examples/hello/mcpp.toml
-          grep -q 'path = ".spec"' mcpp.toml && grep -q 'path = "../../.spec"' examples/hello/mcpp.toml \
-            || { echo "::error::the specification was not substituted"; exit 1; }
+          # ⚠️ NOT `sed -i'. This step runs on macOS and on Windows too, and
+          # BSD sed requires an argument to -i that GNU sed refuses. A temporary
+          # file is the spelling that holds on all three.
+          subst() {   # subst <file> <relative-path-to-the-specification>
+            sed "s|^openkal = .*$|openkal = { path = \"$2\" }|" "$1" > "$1.next"
+            mv "$1.next" "$1"
+            grep -q "path = \"$2\"" "$1" \
+              || { echo "::error::$1 was not substituted"; exit 1; }
+          }
+          subst mcpp.toml .spec
+          subst examples/hello/mcpp.toml ../../.spec
       - name: Install OVMF and qemu
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
 
@@ -460,9 +467,16 @@ jobs:
           # a graph in which one package reaches a dependency by version and
           # another by path, so substituting only the root leaves the build
           # refusing for a second reason instead of the first.
-          sed -i 's|^openkal = .*$|openkal = { path = ".spec" }|' mcpp.toml
-          grep -q 'path = ".spec"' mcpp.toml \
-            || { echo "::error::the specification was not substituted"; exit 1; }
+          # ⚠️ NOT `sed -i'. This step runs on macOS and on Windows too, and
+          # BSD sed requires an argument to -i that GNU sed refuses. A temporary
+          # file is the spelling that holds on all three.
+          subst() {   # subst <file> <relative-path-to-the-specification>
+            sed "s|^openkal = .*$|openkal = { path = \"$2\" }|" "$1" > "$1.next"
+            mv "$1.next" "$1"
+            grep -q "path = \"$2\"" "$1" \
+              || { echo "::error::$1 was not substituted"; exit 1; }
+          }
+          subst mcpp.toml .spec
       - name: The EFI application cross-builds
         run: |
           # ⚠️ TWICE, AND THE FIRST IS ALLOWED TO FAIL — every row of this
