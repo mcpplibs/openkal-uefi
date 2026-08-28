@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
+      # The specification is taken from the branch of the same name where one
+      # exists, so a change spanning both repositories is reviewed as a whole.
+      OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
       MCPP_VERSION: 2026.8.27.1
       XLINGS_VERSION: v2026.8.17.2
       XLINGS_NON_INTERACTIVE: '1'
@@ -151,6 +154,54 @@ jobs:
             echo "under review: $("$built" --version)  (from $MCPP_SOURCE_REF)"
           fi
 
+
+      # ⚠️⚠️ A JOB THAT RESOLVES THE PUBLISHED SPECIFICATION CANNOT REVIEW A
+      # CHANGE TO ONE.
+      #
+      # Another step in this file already clones the specification and
+      # substitutes it, and that made the arrangement look complete. It was not:
+      # the steps below reached `openkal' BY VERSION, so a version under review
+      # --- which by definition is not published --- failed them with
+      #
+      #     E_NOT_FOUND: package 'compat.openkal@0.9.0' not found in the
+      #     synced index ... the index is current, so this name is either
+      #     wrong or not published yet
+      #
+      # ⭐⭐ THE UNIT IS THE JOB, NOT THE REPOSITORY. Measured 2026-08-28 across
+      # the eight repositories of this ecosystem while one change spanned all of
+      # them: seven jobs in three repositories had this shape, and every one of
+      # those repositories ALSO had a job that substituted correctly --- which is
+      # what made the gap invisible to a check done a repository at a time.
+      #
+      # These jobs are green on `main` and can only be green there, because
+      # there the published version is the one under test. That is the property
+      # that makes the defect silent: it is not a check that fails, it is a
+      # check that cannot run at the only time it would have something to say.
+      - name: Point at the specification's working tree
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/mcpplibs/openkal .spec
+          if git -C .spec rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
+            git -C .spec checkout --quiet "origin/$OPENKAL_BRANCH"
+            echo "the specification is at $OPENKAL_BRANCH"
+          else
+            echo "the specification has no $OPENKAL_BRANCH; its default branch is used"
+          fi
+          # ⚠️ EVERY MANIFEST THAT NAMES IT, AND BY THE SAME FORM. mcpp refuses
+          # a graph in which one package reaches a dependency by version and
+          # another by path, so substituting only the root leaves the build
+          # refusing for a second reason instead of the first.
+          # ⚠️ NOT `sed -i'. This step runs on macOS and on Windows too, and
+          # BSD sed requires an argument to -i that GNU sed refuses. A temporary
+          # file is the spelling that holds on all three.
+          subst() {   # subst <file> <relative-path-to-the-specification>
+            sed "s|^openkal = .*$|openkal = { path = \"$2\" }|" "$1" > "$1.next"
+            mv "$1.next" "$1"
+            grep -q "path = \"$2\"" "$1" \
+              || { echo "::error::$1 was not substituted"; exit 1; }
+          }
+          subst mcpp.toml .spec
+          subst examples/hello/mcpp.toml ../../.spec
       - name: Install OVMF and qemu
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
 
@@ -234,6 +285,9 @@ jobs:
       run:
         shell: bash
     env:
+      # The specification is taken from the branch of the same name where one
+      # exists, so a change spanning both repositories is reviewed as a whole.
+      OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
       MCPP_VERSION: 2026.8.27.1
       XLINGS_VERSION: v2026.8.17.2
       XLINGS_NON_INTERACTIVE: '1'
@@ -376,6 +430,53 @@ jobs:
             echo "under review: $("$built" --version)  (from $MCPP_SOURCE_REF)"
           fi
 
+
+      # ⚠️⚠️ A JOB THAT RESOLVES THE PUBLISHED SPECIFICATION CANNOT REVIEW A
+      # CHANGE TO ONE.
+      #
+      # Another step in this file already clones the specification and
+      # substitutes it, and that made the arrangement look complete. It was not:
+      # the steps below reached `openkal' BY VERSION, so a version under review
+      # --- which by definition is not published --- failed them with
+      #
+      #     E_NOT_FOUND: package 'compat.openkal@0.9.0' not found in the
+      #     synced index ... the index is current, so this name is either
+      #     wrong or not published yet
+      #
+      # ⭐⭐ THE UNIT IS THE JOB, NOT THE REPOSITORY. Measured 2026-08-28 across
+      # the eight repositories of this ecosystem while one change spanned all of
+      # them: seven jobs in three repositories had this shape, and every one of
+      # those repositories ALSO had a job that substituted correctly --- which is
+      # what made the gap invisible to a check done a repository at a time.
+      #
+      # These jobs are green on `main` and can only be green there, because
+      # there the published version is the one under test. That is the property
+      # that makes the defect silent: it is not a check that fails, it is a
+      # check that cannot run at the only time it would have something to say.
+      - name: Point at the specification's working tree
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/mcpplibs/openkal .spec
+          if git -C .spec rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
+            git -C .spec checkout --quiet "origin/$OPENKAL_BRANCH"
+            echo "the specification is at $OPENKAL_BRANCH"
+          else
+            echo "the specification has no $OPENKAL_BRANCH; its default branch is used"
+          fi
+          # ⚠️ EVERY MANIFEST THAT NAMES IT, AND BY THE SAME FORM. mcpp refuses
+          # a graph in which one package reaches a dependency by version and
+          # another by path, so substituting only the root leaves the build
+          # refusing for a second reason instead of the first.
+          # ⚠️ NOT `sed -i'. This step runs on macOS and on Windows too, and
+          # BSD sed requires an argument to -i that GNU sed refuses. A temporary
+          # file is the spelling that holds on all three.
+          subst() {   # subst <file> <relative-path-to-the-specification>
+            sed "s|^openkal = .*$|openkal = { path = \"$2\" }|" "$1" > "$1.next"
+            mv "$1.next" "$1"
+            grep -q "path = \"$2\"" "$1" \
+              || { echo "::error::$1 was not substituted"; exit 1; }
+          }
+          subst mcpp.toml .spec
       - name: The EFI application cross-builds
         run: |
           # ⚠️ TWICE, AND THE FIRST IS ALLOWED TO FAIL — every row of this

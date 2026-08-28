@@ -45,9 +45,9 @@ efi_system_table*   g_st    = nullptr;
 // window rather than a cache.
 constexpr unsigned kChunk = 128;
 
-kal_io_result write_to(efi_simple_text_output_protocol* out,
+kal_intptr write_to(efi_simple_text_output_protocol* out,
                        const unsigned char* p, kal_uintptr n) {
-    if (!out) return kal_io_result{0, kal_err_io};
+    if (!out) return -kal_err_io;
     efi_char16 buf[kChunk * 2 + 1];        // worst case: every byte becomes CR LF
     kal_uintptr done = 0;
     while (done < n) {
@@ -63,9 +63,9 @@ kal_io_result write_to(efi_simple_text_output_protocol* out,
         }
         buf[w] = 0;
         if (out->output_string(out, buf) != EFI_SUCCESS)
-            return kal_io_result{done, kal_err_io};
+            return done ? static_cast<kal_intptr>(done) : -kal_err_io;
     }
-    return kal_io_result{done, kal_ok};
+    return static_cast<kal_intptr>(done);
 }
 
 }  // namespace
@@ -112,13 +112,13 @@ kal_stream kal_stdin (void) { return kal_stream{kStdin};  }
 kal_stream kal_stdout(void) { return kal_stream{kStdout}; }
 kal_stream kal_stderr(void) { return kal_stream{kStderr}; }
 
-kal_io_result kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
-    if (!g_st) return kal_io_result{0, kal_err_io};
+kal_intptr kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
+    if (!g_st) return -kal_err_io;
     efi_simple_text_output_protocol* out =
         s.h == kStdout ? g_st->con_out
       : s.h == kStderr ? (g_st->std_err ? g_st->std_err : g_st->con_out)
       : nullptr;
-    if (!out) return kal_io_result{0, kal_err_invalid};
+    if (!out) return -kal_err_invalid;
     return write_to(out, static_cast<const unsigned char*>(buf), n);
 }
 
@@ -128,9 +128,9 @@ kal_io_result kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
 // loses every key that is not a plain character. Returning "no bytes, no error"
 // is end of input, which is the truthful reading of a console this
 // implementation does not attempt to interpret.
-kal_io_result kal_stream_read(kal_stream s, void*, kal_uintptr) {
-    if (s.h != kStdin) return kal_io_result{0, kal_err_invalid};
-    return kal_io_result{0, kal_ok};
+kal_intptr kal_stream_read(kal_stream s, void*, kal_uintptr) {
+    if (s.h != kStdin) return -kal_err_invalid;
+    return 0;
 }
 
 // The console is unbuffered by this implementation; the bytes were handed to
@@ -153,6 +153,14 @@ kal_uintptr kal_stream_props(kal_stream s) {
 // a stricter alignment is satisfied by over-allocating and storing the original
 // pointer immediately before the aligned address — the same technique a C
 // library uses for `aligned_alloc` where the platform lacks one.
+// The quantum this environment allocates and protects memory in.
+//
+// Firmware hands out memory in pages of four kilobytes --- that is the unit of
+// `AllocatePages', which is what this allocator draws on --- and it applies no
+// protection of its own. The coarser of the two is therefore the page, and a
+// caller that rounds to it is never wrong.
+kal_uintptr kal_memory_granularity(void) { return 4096; }
+
 void* kal_alloc(kal_uintptr size, kal_uintptr align) {
     if (!g_st) return nullptr;
     if (size == 0) size = 1;
