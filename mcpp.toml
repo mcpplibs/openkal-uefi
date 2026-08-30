@@ -15,7 +15,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-uefi"
-version     = "0.4.0"
+version     = "0.5.0"
 description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
 license     = "Apache-2.0"
 
@@ -32,7 +32,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-uefi"
 
 [dependencies]
-openkal = "0.10.0"
+openkal = "0.11.0"
 
 [build]
 flags = [
