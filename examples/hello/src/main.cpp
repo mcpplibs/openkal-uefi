@@ -1,6 +1,6 @@
 // A UEFI application written against openkal, with no UEFI type in sight.
 //
-// ⚠️ `kal_main` and not `main`: nothing here supplies a C runtime, and the
+// `kal_main` and not `main`: nothing here supplies a C runtime, and the
 // backend's `efi_main` is what firmware calls. That indirection is the point —
 // the same source compiles against any openkal implementation.
 import openkal.stream;

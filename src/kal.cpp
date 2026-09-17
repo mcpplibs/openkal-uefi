@@ -11,13 +11,13 @@
 //   openkal.memory   AllocatePool / FreePool
 //   openkal.abort    Exit
 //
-// ⚠️ `process` and `task` are absent because UEFI has no process model — an
+// `process` and `task` are absent because UEFI has no process model — an
 // application is the only thing running, and an interface provided in part
 // would be worse than one provided not at all. `import openkal.process;` does
 // not resolve, which is the honest answer rather than a set of calls that
 // always fail.
 //
-// ⚠️ THE ONE PLACE THIS IS NOT FORWARDING: TEXT.
+// THE ONE PLACE THIS IS NOT FORWARDING: TEXT.
 //
 // openkal streams carry bytes. UEFI's console takes UCS-2 and treats a line
 // feed on its own as a bare cursor movement. Every write therefore widens and
@@ -54,7 +54,7 @@ kal_intptr write_to(efi_simple_text_output_protocol* out,
         unsigned w = 0;
         while (done < n && w < kChunk * 2) {
             const unsigned char c = p[done];
-            // ⚠️ A bare LF moves the cursor down without returning it, so a
+            // A bare LF moves the cursor down without returning it, so a
             // second line begins under the end of the first. Firmware differs
             // in how it renders that; none of them do what the writer meant.
             if (c == '\n') buf[w++] = u'\r';
@@ -75,7 +75,7 @@ extern "C" {
 // The entry point firmware calls. It records the two values every other
 // function here needs and then enters the program.
 //
-// ⚠️ `kal_main` and not `main`: there is no C runtime to call one, and naming
+// `kal_main` and not `main`: there is no C runtime to call one, and naming
 // it `main` would invite a toolchain to attach startup code that does not exist
 // in this arrangement.
 [[noreturn]] void kal_main();
@@ -122,7 +122,7 @@ kal_intptr kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
     return write_to(out, static_cast<const unsigned char*>(buf), n);
 }
 
-// ⚠️ Not provided in a usable form, and reported rather than faked. UEFI's
+// Not provided in a usable form, and reported rather than faked. UEFI's
 // console input is a key-stroke protocol with a wait event, not a byte stream;
 // presenting it as one would give a reader something that appears to work and
 // loses every key that is not a plain character. Returning "no bytes, no error"
@@ -147,7 +147,7 @@ kal_uintptr kal_stream_props(kal_stream s) {
 
 // ── openkal.memory ──────────────────────────────────────────────────────────
 //
-// ⚠️ AllocatePool has no alignment parameter. It guarantees 8-byte alignment,
+// AllocatePool has no alignment parameter. It guarantees 8-byte alignment,
 // which covers every fundamental type on this architecture but not an
 // over-aligned one. Rather than return memory that does not meet the request,
 // a stricter alignment is satisfied by over-allocating and storing the original

@@ -1,6 +1,6 @@
 /* The part of the UEFI specification this implementation uses.
  *
- * ⚠️ WHY THE MinGW TARGET AND NOT A BARE-METAL ONE.
+ * WHY THE MinGW TARGET AND NOT A BARE-METAL ONE.
  *
  * A UEFI application is PE/COFF with subsystem 10, and it is entered through
  * the Microsoft x64 calling convention. Both are properties this toolchain
@@ -14,7 +14,7 @@
  * produces `IMAGE_SUBSYSTEM_EFI_APPLICATION` with no DLL imports, which is
  * exactly what firmware loads.
  *
- * ⚠️ THE OFFSETS ARE CHECKED, NOT TRUSTED.
+ * THE OFFSETS ARE CHECKED, NOT TRUSTED.
  *
  * These tables are ABI, and a field written one slot out reads a neighbouring
  * function pointer — which calls something that exists, with the wrong
