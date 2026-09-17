@@ -13,7 +13,7 @@ openkal      = "0.9.0"
 openkal-uefi = "0.3.0"
 ```
 
-## ⚠️ The target is `x86_64-windows-gnu`, and that is not a workaround
+## The target is `x86_64-windows-gnu`, and that is not a workaround
 
 A UEFI application is PE/COFF with subsystem 10, entered through the Microsoft
 x64 calling convention. Both are properties this toolchain already has, so
@@ -38,7 +38,7 @@ way. This backend is mostly forwarding:
 | `memory` | `AllocatePool` / `FreePool` |
 | `abort` | `Exit` |
 
-⚠️ `process` and `task` are absent because UEFI has no process model. An
+`process` and `task` are absent because UEFI has no process model. An
 application is the only thing running, and an interface provided in part would
 be worse than one provided not at all — `import openkal.process;` does not
 resolve, which is the honest answer rather than a set of calls that always fail.
@@ -66,7 +66,7 @@ bytes. A stricter request is satisfied by over-allocating and storing the
 original pointer immediately before the aligned address, which is what a C
 library does where the platform lacks `aligned_alloc`.
 
-**Input.** ⚠️ `kal_stream_read` reports end of input rather than pretending.
+**Input.** `kal_stream_read` reports end of input rather than pretending.
 UEFI's console input is a key-stroke protocol with a wait event, not a byte
 stream; presenting it as one would give a reader something that appears to work
 and silently loses every key that is not a plain character.
