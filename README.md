@@ -10,7 +10,7 @@ ldflags = ["-nostdlib", "-Wl,--subsystem,10", "-Wl,-e,efi_main"]
 
 [dependencies]
 openkal      = "0.14.0"
-openkal-uefi = "0.8.0"
+openkal-uefi = "0.8.1"
 ```
 
 ## The target is `x86_64-windows-gnu`, and that is not a workaround
