@@ -1,8 +1,8 @@
-target/
-.mcpp/
-compile_commands.json
-mcpp.lock
 
 # A working tree of the specification placed beside the sources. No trailing
+compile_commands.json
+.mcpp/
+mcpp.lock
 # slash: the pattern must match a symbolic link to one as well as a directory.
 .spec
+target/

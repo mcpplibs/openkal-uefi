@@ -3,92 +3,62 @@
 An implementation of [openkal][kal] on UEFI Boot Services, for applications the
 firmware loads before an operating system exists.
 
-```toml
-[build]
-target  = "x86_64-windows-gnu"
-ldflags = ["-nostdlib", "-Wl,--subsystem,10", "-Wl,-e,efi_main"]
+A program names the target and nothing else; the row `x86_64-uefi`, its compile
+and link conventions and its runner are the platform package's
+([openkal-uefi-platform][plat]), which selects this implementation:
 
-[dependencies]
-openkal      = "0.14.1"
-openkal-uefi = "0.8.1"
+```toml
+[target.x86_64-uefi]
+platform = "openkal-uefi-platform@0.1.0"
 ```
 
-## The target is `x86_64-windows-gnu`, and that is not a workaround
+```sh
+mcpp build --target x86_64-uefi      # hello.efi: PE32+, subsystem EFI application
+mcpp run   --target x86_64-uefi      # booted under QEMU with the edk2 firmware
+```
 
-A UEFI application is PE/COFF with subsystem 10, entered through the Microsoft
-x64 calling convention. Both are properties this toolchain already has, so
-firmware function pointers are called directly rather than through per-call
-annotations.
+## What a program receives
 
-The first analysis of this backend concluded that mcpp would need a new "PE
-freestanding" target before a UEFI application could exist at all. **Measured:
-it does not.** The three link flags above produce
-`IMAGE_SUBSYSTEM_EFI_APPLICATION (0xA)` with no DLL imports, which is what
-firmware loads.
-
-## Why UEFI fits this specification
-
-openkal divides its interfaces by the **kind of resource** rather than by which
-part of a standard library becomes available, and Boot Services divide the same
-way. This backend is mostly forwarding:
+The firmware calls `efi_main`; this implementation records its tables, turns off
+the boot manager's watchdog, runs the program's static initialisers (read from
+the image's own `.ctors` and `.CRT` sections, there being no C runtime) and calls
+`main(argc, argv, envp)`. The arguments are the image's load options split at
+spaces; firmware that gave none gives one empty name.
 
 | openkal | UEFI |
 |---|---|
-| `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` |
-| `memory` | `AllocatePool` / `FreePool` |
-| `abort` | `Exit` |
+| `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` (UCS-2, `\n` as CR LF); input reports its end |
+| `memory` | `AllocatePool` / `FreePool`, over-allocated for a stricter alignment |
+| `env` | the load options; no variables, image, loader or system name (absent) |
+| `time` | `GetTime` for the wall clock; the processor's counter, measured against `Stall`, for the monotonic one; `Stall` for a sleep |
+| `abort` | `Exit` with the status as a warning code, so a starter reads the number |
 
-`process` and `task` are absent because UEFI has no process model. An
-application is the only thing running, and an interface provided in part would
-be worse than one provided not at all — `import openkal.process;` does not
-resolve, which is the honest answer rather than a set of calls that always fail.
+`process` waits for `fs` over the firmware's file system protocol, since a
+program is started by name through a directory; the specification's property for
+an environment with one task (`KAL_PROCESS_PROP_RUNS_TO_END`, openkal 0.25.1
+clause 7.19) is what it will claim. The rest have no firmware service beneath them.
 
-The five interfaces version 0.8 adds are absent by the same rule. UEFI has no
-process model to copy an address space within, so `space` is not provided; no
-second context to bound a wait against, so `timeout` is not; and while Boot
-Services do expose a network stack, this backend forwards only the protocols
-listed above, so `net` and `datagram` are not. `terminal` is absent because
-`SIMPLE_TEXT_OUTPUT_PROTOCOL` has no mode to read or set.
+## The board's exit
 
-Clause 6.1 makes each absence a link-time absence, so a program requiring one of
-them is refused when it is built rather than when it runs.
-
-## The three places this is not forwarding
-
-**Text.** openkal streams carry bytes; UEFI's console takes UCS-2 and treats a
-bare line feed as a cursor movement that does not return the carriage. Every
-write widens and translates, through a fixed-size buffer rather than an
-allocation — a diagnostic path that allocates is one that can fail while
-reporting a failure.
-
-**Alignment.** `AllocatePool` has no alignment parameter and guarantees eight
-bytes. A stricter request is satisfied by over-allocating and storing the
-original pointer immediately before the aligned address, which is what a C
-library does where the platform lacks `aligned_alloc`.
-
-**Input.** `kal_stream_read` reports end of input rather than pretending.
-UEFI's console input is a key-stroke protocol with a wait event, not a byte
-stream; presenting it as one would give a reader something that appears to work
-and silently loses every key that is not a plain character.
+A status leaves an application through `Exit`, to whoever started it. A board on
+which it must leave the machine --- an emulator running it as a test --- defines
+`okuefi_board_exit(int)` in its platform package, and `kal_exit` calls it first;
+the definition here does nothing. openkal-uefi-platform's writes the status to
+QEMU's debug-exit port, only when the processor names QEMU as its hypervisor.
 
 ## The table offsets are checked, not trusted
 
-These structures are ABI. A field written one slot out reads a neighbouring
-function pointer — which calls something that exists, with the wrong arguments,
-and the failure appears far from the cause. Every member this backend reaches is
-pinned by a `static_assert` on its offset, so a mistake is a compile error.
+These structures are ABI. A field one slot out reads a neighbouring function
+pointer, which calls something that exists with the wrong arguments. Every member
+this implementation reaches is pinned by a `static_assert` on its offset.
 
 ## Verified
 
-`examples/hello` boots under OVMF in QEMU as `EFI/BOOT/BOOTX64.EFI`:
-
-```
-BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " …
-hello from openkal over UEFI
-pool ok
-```
-
-`kal_exit` returns control to the firmware, which proceeds to its own boot
-manager — the status reaches the loader rather than the program spinning.
+`examples/hello`, built with mcpp 2026.11.12.1 and booted by dirun as
+`EFI/BOOT/BOOTX64.EFI` under QEMU's q35 with the edk2 firmware (0.45 s, KVM):
+a static initialiser ran, the arguments are counted, an over-aligned allocation,
+a 20 ms sleep measured as such, the wall clock reads the present; status 42
+returned through the board's exit.
 
 [kal]: https://github.com/mcpplibs/openkal
+[plat]: https://github.com/mcpplibs/openkal-uefi-platform

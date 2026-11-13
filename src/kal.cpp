@@ -30,6 +30,7 @@
 #include <openkal/stream.h>
 
 #include "uefi.h"
+#include "state.h"
 
 namespace {
 
@@ -37,8 +38,9 @@ constexpr kal_uintptr kStdin  = 0;
 constexpr kal_uintptr kStdout = 1;
 constexpr kal_uintptr kStderr = 2;
 
-efi_handle          g_image = nullptr;
-efi_system_table*   g_st    = nullptr;
+// The firmware's tables, recorded by efi_main (start.cpp).
+#define g_st    (okuefi::self().st)
+#define g_image (okuefi::self().image)
 
 // A line at a time is enough to keep the trap count low without making this a
 // large object; UEFI's own console is not fast, and the buffer is a translation
@@ -78,15 +80,12 @@ extern "C" {
 // `kal_main` and not `main`: there is no C runtime to call one, and naming
 // it `main` would invite a toolchain to attach startup code that does not exist
 // in this arrangement.
-[[noreturn]] void kal_main();
+// THE BOARD'S EXIT. A status leaves an application through Exit, to whoever started it --- a
+// shell, the boot manager --- and a board on which a program's status must leave the machine (an
+// emulator that runs it as a test) defines this function in its platform package to carry it
+// there before Exit is called. The definition here is the default, and does nothing.
+[[gnu::weak]] void okuefi_board_exit(int) {}
 
-efi_status efi_main(efi_handle image, efi_system_table* st) {
-    g_image = image;
-    g_st    = st;
-    kal_main();
-}
-
-// ── openkal.abort ───────────────────────────────────────────────────────────
 KAL_NORETURN void kal_abort(const char* msg, kal_uintptr len) {
     if (g_st && msg && len)
         write_to(g_st->std_err ? g_st->std_err : g_st->con_out,
@@ -100,10 +99,11 @@ KAL_NORETURN void kal_abort(const char* msg, kal_uintptr len) {
 }
 
 KAL_NORETURN void kal_exit(int code) {
+    okuefi_board_exit(code);
+    // The status itself, as a warning code (the high bit clear), so that the program that started
+    // this one reads the number and not only success or failure.
     if (g_st)
-        g_st->boot_services->exit(g_image,
-                                  code == 0 ? EFI_SUCCESS : EFI_ABORTED,
-                                  0, nullptr);
+        g_st->boot_services->exit(g_image, static_cast<efi_status>(code & 0xff), 0, nullptr);
     for (;;) {}
 }
 
@@ -160,6 +160,13 @@ kal_uintptr kal_stream_props(kal_stream s) {
 // protection of its own. The coarser of the two is therefore the page, and a
 // caller that rounds to it is never wrong.
 kal_uintptr kal_memory_granularity(void) { return 4096; }
+
+// The pool's size is the firmware's and not stated by Boot Services; nothing is reported.
+int kal_memory_info(kal_memory_status* out) {
+    if (out == nullptr || out->self_size < 2 * sizeof(kal_u32)) return kal_err_invalid;
+    out->present = 0;
+    return kal_ok;
+}
 
 void* kal_alloc(kal_uintptr size, kal_uintptr align) {
     if (!g_st) return nullptr;
