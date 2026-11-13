@@ -11,5 +11,7 @@ openkal = "^0.25.0"
 # The implementation under change; the platform names openkal-uefi by version.
 openkal-uefi = { path = "../..", override = true }
 
+# The arrangement with no C library, on this repository's board (examples/board). An application
+# with the C library and C++ run-time names openkal-platform instead (README).
 [target.x86_64-uefi]
-platform = "openkal-uefi-platform@0.1.0"
+platform = { path = "../board" }

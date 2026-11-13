@@ -11,6 +11,15 @@
 
 extern "C" int main(int, char**, char**);
 
+#ifdef OKUEFI_STANDALONE
+// THE STANDALONE ARRANGEMENT (0.10.0): a C library above this implementation (openkal-musl)
+// receives the program at the name every C library's hand-over has. It obtains the arguments
+// through openkal.env and runs the initialisers itself, so this entry records the firmware's
+// tables and the arguments and hands over; the image's sections are not walked here.
+extern "C" int __libc_start_main(int (*)(int, char**, char**), int, char**,
+                                 void (*)(), void (*)(), void (*)());
+#endif
+
 namespace {
 
 // THE STATIC INITIALISERS are found in this image's own section table. A compiler for this target
@@ -121,12 +130,17 @@ extern "C" efi_status efi_main(efi_handle image, efi_system_table* st) {
     if (st->boot_services->handle_protocol(image, &kLoadedImageProtocol, reinterpret_cast<void**>(&li)) != EFI_SUCCESS)
         li = nullptr;
     record_arguments(li);
-    run_initialisers(li ? li->image_base : nullptr);
     // Position zero is the name the program was started by; firmware that gave none gives an empty
-    // name rather than none (openkal.env).
+    // name rather than none (openkal.env), in both arrangements.
     static char name[] = "";
     static char* unnamed[] = {name, nullptr};
-    static char* no_environment[] = {nullptr};
     if (s.argc == 0) { s.argc = 1; s.argv = unnamed; }
+#ifdef OKUEFI_STANDALONE
+    __libc_start_main(main, 0, nullptr, nullptr, nullptr, nullptr);
+    kal_exit(127);
+#else
+    run_initialisers(li ? li->image_base : nullptr);
+    static char* no_environment[] = {nullptr};
     kal_exit(main(s.argc, s.argv, no_environment));
+#endif
 }

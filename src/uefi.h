@@ -73,8 +73,9 @@ struct efi_boot_services {
     efi_table_header hdr;                    /*   0 */
     void* raise_tpl;                         /*  24 */
     void* restore_tpl;                       /*  32 */
-    void* allocate_pages;                    /*  40 */
-    void* free_pages;                        /*  48 */
+    efi_status (*allocate_pages)(int type, int memory_type, efi_uintn pages,
+                                 unsigned long long* memory);          /* 40 */
+    efi_status (*free_pages)(unsigned long long memory, efi_uintn pages);  /* 48 */
     void* get_memory_map;                    /*  56 */
     efi_status (*allocate_pool)(int type, efi_uintn size, void** buf);  /* 64 */
     efi_status (*free_pool)(void* buf);      /*  72 */
@@ -103,6 +104,14 @@ struct efi_boot_services {
     efi_status (*stall)(efi_uintn microseconds);                       /* 248 */
     efi_status (*set_watchdog_timer)(efi_uintn seconds, unsigned long long code,
                                      efi_uintn data_size, efi_char16* data);  /* 256 */
+    void* connect_controller;                /* 264 */
+    void* disconnect_controller;             /* 272 */
+    void* open_protocol;                     /* 280 */
+    void* close_protocol;                    /* 288 */
+    void* open_protocol_information;         /* 296 */
+    void* protocols_per_handle;              /* 304 */
+    void* locate_handle_buffer;              /* 312 */
+    efi_status (*locate_protocol)(const struct efi_guid*, void* registration, void** iface);  /* 320 */
 };
 
 static_assert(__builtin_offsetof(efi_boot_services, allocate_pool) == 64,
@@ -114,6 +123,13 @@ static_assert(__builtin_offsetof(efi_boot_services, exit_boot_services) == 232);
 static_assert(__builtin_offsetof(efi_boot_services, handle_protocol) == 152);
 static_assert(__builtin_offsetof(efi_boot_services, stall) == 248);
 static_assert(__builtin_offsetof(efi_boot_services, set_watchdog_timer) == 256);
+static_assert(__builtin_offsetof(efi_boot_services, allocate_pages) == 40);
+static_assert(__builtin_offsetof(efi_boot_services, free_pages) == 48);
+static_assert(__builtin_offsetof(efi_boot_services, locate_protocol) == 320);
+
+/* EFI_ALLOCATE_TYPE and EFI_MEMORY_TYPE: the two this implementation asks for. */
+enum { AllocateAnyPages = 0, AllocateAddress = 2 };
+enum { EfiLoaderCode = 1 };
 
 struct efi_guid { efi_u32 a; efi_u16 b, c; efi_u8 d[8]; };
 
@@ -175,5 +191,21 @@ static_assert(__builtin_offsetof(efi_system_table, con_out) == 64,
 static_assert(__builtin_offsetof(efi_system_table, std_err) == 80);
 static_assert(__builtin_offsetof(efi_system_table, boot_services) == 96,
               "EFI_SYSTEM_TABLE.BootServices follows RuntimeServices");
+
+/* EFI_MEMORY_ATTRIBUTE_PROTOCOL (UEFI 2.10): the protection of a range of memory. Firmware that
+ * enforces "no page both writable and executable" offers it; older firmware maps every page both,
+ * and has nothing to ask. */
+struct efi_memory_attribute_protocol {
+    efi_status (*get_memory_attributes)(efi_memory_attribute_protocol*, unsigned long long base,
+                                        unsigned long long length, unsigned long long* attributes);
+    efi_status (*set_memory_attributes)(efi_memory_attribute_protocol*, unsigned long long base,
+                                        unsigned long long length, unsigned long long attributes);
+    efi_status (*clear_memory_attributes)(efi_memory_attribute_protocol*, unsigned long long base,
+                                          unsigned long long length, unsigned long long attributes);
+};
+inline constexpr efi_guid kMemoryAttributeProtocol = {
+    0xf4560cf6, 0x40ec, 0x4b4a, {0xa1, 0x92, 0xbf, 0x1d, 0x57, 0xd0, 0xb1, 0x89}};
+inline constexpr unsigned long long EFI_MEMORY_XP = 0x0000000000004000ull;
+inline constexpr unsigned long long EFI_MEMORY_RO = 0x0000000000020000ull;
 
 #endif /* OPENKAL_UEFI_H */

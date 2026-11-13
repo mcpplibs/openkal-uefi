@@ -202,18 +202,6 @@ jobs:
           }
           subst mcpp.toml .spec
           subst examples/hello/mcpp.toml ../../.spec
-      # THE PLATFORM, AS THE SPECIFICATION IS: its repository's branch of the same name, else its
-      # default branch, named by path in the example (the example states the released version).
-      - name: Point at the platform's working tree
-        run: |
-          set -euo pipefail
-          git clone --quiet https://github.com/mcpplibs/openkal-uefi-platform .platform
-          if git -C .platform rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
-            git -C .platform checkout --quiet "origin/$OPENKAL_BRANCH"
-          fi
-          f=examples/hello/mcpp.toml
-          sed "s|^platform = .*$|platform = { path = \"../../.platform\" }|" "$f" > "$f.next" && mv "$f.next" "$f"
-          grep -q 'path = "../../.platform"' "$f" || { echo "::error::$f was not substituted"; exit 1; }
       - name: Install OVMF and qemu
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
 
@@ -476,18 +464,6 @@ jobs:
           }
           subst mcpp.toml .spec
           subst examples/hello/mcpp.toml ../../.spec
-      # THE PLATFORM, AS THE SPECIFICATION IS: its repository's branch of the same name, else its
-      # default branch, named by path in the example (the example states the released version).
-      - name: Point at the platform's working tree
-        run: |
-          set -euo pipefail
-          git clone --quiet https://github.com/mcpplibs/openkal-uefi-platform .platform
-          if git -C .platform rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
-            git -C .platform checkout --quiet "origin/$OPENKAL_BRANCH"
-          fi
-          f=examples/hello/mcpp.toml
-          sed "s|^platform = .*$|platform = { path = \"../../.platform\" }|" "$f" > "$f.next" && mv "$f.next" "$f"
-          grep -q 'path = "../../.platform"' "$f" || { echo "::error::$f was not substituted"; exit 1; }
       - name: The EFI application cross-builds
         run: |
           cd examples/hello
