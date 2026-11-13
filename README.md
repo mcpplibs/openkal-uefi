@@ -88,7 +88,7 @@ mapped (no `openkal.fs`), so `kal_exec_map_part` answers not supported.
 `EFI/BOOT/BOOTX64.EFI` under QEMU's q35 with the edk2 firmware (0.45 s, KVM):
 a static initialiser ran, the arguments are counted, an over-aligned allocation,
 a 20 ms sleep measured as such, the wall clock reads the present; status 42
-returned through the board's exit. 0.10.0 adds an allocation aligned to 256 MiB,
+returned through the board's exit. 0.10.0 adds an allocation aligned to 16 MiB,
 which is pages placed at that alignment and no more than its size.
 
 0.10.0 beneath openkal-musl 0.29.6 and openkal-llvm-runtime 0.20.3 (mcpp
