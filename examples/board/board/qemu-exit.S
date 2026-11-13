@@ -28,3 +28,11 @@ okuefi_board_exit:
 	out %eax, %dx
 1:	pop %rbx
 	ret
+
+/* THE BOARD'S ERROR CONSOLE: OVMF's StdErr writes nothing to the serial console the runner reads,
+ * so standard error is ConOut on this board (okuefi_board_errors_to_console, nonzero). */
+	.globl okuefi_board_errors_to_console
+	.def okuefi_board_errors_to_console; .scl 2; .type 32; .endef
+okuefi_board_errors_to_console:
+	mov $1, %eax
+	ret

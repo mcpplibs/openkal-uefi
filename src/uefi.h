@@ -67,6 +67,19 @@ struct efi_simple_text_input_protocol {
     void*       wait_for_key;
 };
 
+/* One entry of the memory map (EFI_MEMORY_DESCRIPTOR). Entries are `descriptor_size' bytes apart,
+ * which may exceed this structure; a reader steps by that size and never by sizeof. */
+struct efi_memory_descriptor {
+    unsigned int       type;
+    unsigned int       pad;
+    unsigned long long physical_start;
+    unsigned long long virtual_start;
+    unsigned long long pages;
+    unsigned long long attribute;
+};
+inline constexpr unsigned int EfiConventionalMemory = 7;
+inline constexpr efi_status EFI_BUFFER_TOO_SMALL = 0x8000000000000005ULL;
+
 /* Only as far as `exit`, with every intervening slot named so that the offsets
  * are computed rather than counted by hand. */
 struct efi_boot_services {
@@ -76,7 +89,8 @@ struct efi_boot_services {
     efi_status (*allocate_pages)(int type, int memory_type, efi_uintn pages,
                                  unsigned long long* memory);          /* 40 */
     efi_status (*free_pages)(unsigned long long memory, efi_uintn pages);  /* 48 */
-    void* get_memory_map;                    /*  56 */
+    efi_status (*get_memory_map)(efi_uintn* size, struct efi_memory_descriptor* map, efi_uintn* key,
+                                 efi_uintn* descriptor_size, unsigned int* version);  /* 56 */
     efi_status (*allocate_pool)(int type, efi_uintn size, void** buf);  /* 64 */
     efi_status (*free_pool)(void* buf);      /*  72 */
     void* create_event;                      /*  80 */
@@ -125,6 +139,7 @@ static_assert(__builtin_offsetof(efi_boot_services, stall) == 248);
 static_assert(__builtin_offsetof(efi_boot_services, set_watchdog_timer) == 256);
 static_assert(__builtin_offsetof(efi_boot_services, allocate_pages) == 40);
 static_assert(__builtin_offsetof(efi_boot_services, free_pages) == 48);
+static_assert(__builtin_offsetof(efi_boot_services, get_memory_map) == 56);
 static_assert(__builtin_offsetof(efi_boot_services, locate_protocol) == 320);
 
 /* EFI_ALLOCATE_TYPE and EFI_MEMORY_TYPE: the two this implementation asks for. */

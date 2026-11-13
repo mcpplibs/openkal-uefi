@@ -41,7 +41,7 @@ spaces; firmware that gave none gives one empty name.
 | openkal | UEFI |
 |---|---|
 | `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` (UCS-2, `\n` as CR LF); input reports its end |
-| `memory` | `AllocatePool` / `FreePool`, over-allocated for a stricter alignment |
+| `memory` | `AllocatePool` / `FreePool`, over-allocated for an alignment below a page; pages for a page or more, placed at the alignment from the memory map (0.10.0) |
 | `env` | the load options; no variables, image, loader or system name (absent) |
 | `time` | `GetTime` for the wall clock; the processor's counter, measured against `Stall`, for the monotonic one; `Stall` for a sleep |
 | `abort` | `Exit` with the status as a warning code, so a starter reads the number |
@@ -58,6 +58,13 @@ which it must leave the machine --- an emulator running it as a test --- defines
 `okuefi_board_exit(int)` in its platform package, and `kal_exit` calls it first;
 the definition here does nothing. openkal-platform's (board/qemu-exit.S) writes the status to
 QEMU's debug-exit port, only when the processor names QEMU as its hypervisor.
+
+Standard error is the firmware's `StdErr`. A board on which that console reaches
+nothing a reader sees defines `okuefi_board_errors_to_console()` to return
+nonzero, and standard error is then `ConOut` (0.10.0): under OVMF in QEMU,
+`StdErr` writes nothing to the serial console a runner reads, and a program's
+diagnostics and the message of an abort were lost. openkal-platform's board, and
+this repository's (examples/board), define it.
 
 ## The table offsets are checked, not trusted
 
@@ -81,13 +88,18 @@ mapped (no `openkal.fs`), so `kal_exec_map_part` answers not supported.
 `EFI/BOOT/BOOTX64.EFI` under QEMU's q35 with the edk2 firmware (0.45 s, KVM):
 a static initialiser ran, the arguments are counted, an over-aligned allocation,
 a 20 ms sleep measured as such, the wall clock reads the present; status 42
-returned through the board's exit.
+returned through the board's exit. 0.10.0 adds an allocation aligned to 256 MiB,
+which is pages placed at that alignment and no more than its size.
 
 0.10.0 beneath openkal-musl 0.29.6 and openkal-llvm-runtime 0.20.3 (mcpp
 2026.11.13.1, `--release`): a program of `import std` that prints with
 `std::println` and sorts with `std::ranges::sort` is a 1.2 MB EFI application;
 under OVMF it prints, counts one argument (the empty name) and returns 42 in
-0.8 s.
+0.8 s. An ok image carried by such an application (openkal-platform's carrier,
+the core runner placing it through `openkal.exec`) prints, writes to standard
+error, throws and catches, and returns its status in 0.4 s with 1 GiB or more:
+the carrier's allocator and the image's each place a 32 MiB arena at a 256 MiB
+alignment.
 
 [kal]: https://github.com/mcpplibs/openkal
 [plat]: https://github.com/mcpplibs/openkal-platform
