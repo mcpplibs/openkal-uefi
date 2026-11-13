@@ -25,6 +25,9 @@
 #define OPENKAL_UEFI_H
 
 using efi_status  = unsigned long long;
+using efi_u8      = unsigned char;
+using efi_u16     = unsigned short;
+using efi_u32     = unsigned int;
 using efi_uintn   = unsigned long long;
 using efi_handle  = void*;
 using efi_char16  = char16_t;
@@ -84,7 +87,7 @@ struct efi_boot_services {
     void* install_protocol_interface;        /* 128 */
     void* reinstall_protocol_interface;      /* 136 */
     void* uninstall_protocol_interface;      /* 144 */
-    void* handle_protocol;                   /* 152 */
+    efi_status (*handle_protocol)(efi_handle, const struct efi_guid*, void**);  /* 152 */
     void* reserved;                          /* 160 */
     void* register_protocol_notify;          /* 168 */
     void* locate_handle;                     /* 176 */
@@ -97,7 +100,9 @@ struct efi_boot_services {
     void* unload_image;                      /* 224 */
     void* exit_boot_services;                /* 232 */
     void* get_next_monotonic_count;          /* 240 */
-    void* stall;                             /* 248 */
+    efi_status (*stall)(efi_uintn microseconds);                       /* 248 */
+    efi_status (*set_watchdog_timer)(efi_uintn seconds, unsigned long long code,
+                                     efi_uintn data_size, efi_char16* data);  /* 256 */
 };
 
 static_assert(__builtin_offsetof(efi_boot_services, allocate_pool) == 64,
@@ -106,6 +111,49 @@ static_assert(__builtin_offsetof(efi_boot_services, free_pool) == 72);
 static_assert(__builtin_offsetof(efi_boot_services, exit) == 216,
               "EFI_BOOT_SERVICES.Exit follows StartImage");
 static_assert(__builtin_offsetof(efi_boot_services, exit_boot_services) == 232);
+static_assert(__builtin_offsetof(efi_boot_services, handle_protocol) == 152);
+static_assert(__builtin_offsetof(efi_boot_services, stall) == 248);
+static_assert(__builtin_offsetof(efi_boot_services, set_watchdog_timer) == 256);
+
+struct efi_guid { efi_u32 a; efi_u16 b, c; efi_u8 d[8]; };
+
+/* EFI_TIME: the wall clock as the firmware keeps it, in its own time zone. */
+struct efi_time {
+    efi_u16 year;
+    efi_u8  month, day, hour, minute, second, pad1;
+    efi_u32 nanosecond;
+    short   time_zone;           /* minutes from UTC; 2047: unspecified (local) */
+    efi_u8  daylight, pad2;
+};
+static_assert(sizeof(efi_time) == 16);
+
+/* As far as GetTime, the first service after the header. */
+struct efi_runtime_services {
+    efi_table_header hdr;                    /*   0 */
+    efi_status (*get_time)(efi_time*, void* capabilities);  /* 24 */
+};
+static_assert(__builtin_offsetof(efi_runtime_services, get_time) == 24);
+
+/* EFI_LOADED_IMAGE_PROTOCOL: what the firmware recorded about this image, and
+ * among it the options it was started with (UCS-2 text when a shell or a boot
+ * option gives a command line). */
+struct efi_loaded_image_protocol {
+    efi_u32     revision;
+    efi_handle  parent_handle;
+    void*       system_table;
+    efi_handle  device_handle;
+    void*       file_path;
+    void*       reserved;
+    efi_u32     load_options_size;
+    void*       load_options;
+    void*       image_base;
+    unsigned long long image_size;
+};
+static_assert(__builtin_offsetof(efi_loaded_image_protocol, load_options_size) == 48);
+static_assert(__builtin_offsetof(efi_loaded_image_protocol, load_options) == 56);
+
+inline constexpr efi_guid kLoadedImageProtocol = {
+    0x5B1B31A1, 0x9562, 0x11D2, {0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}};
 
 struct efi_system_table {
     efi_table_header hdr;                    /*   0 */
@@ -118,7 +166,7 @@ struct efi_system_table {
     efi_simple_text_output_protocol* con_out;/*  64 */
     efi_handle       standard_error_handle;  /*  72 */
     efi_simple_text_output_protocol* std_err;/*  80 */
-    void*            runtime_services;       /*  88 */
+    efi_runtime_services* runtime_services;  /*  88 */
     efi_boot_services* boot_services;        /*  96 */
 };
 

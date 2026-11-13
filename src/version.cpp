@@ -6,12 +6,11 @@ extern "C" {
 
 kal_u64 kal_version(void) { return KAL_VERSION; }
 
-// Firmware supplies a console and a page allocator and nothing else this
-// specification has an interface for. `openkal.env' is absent because a program
-// started by firmware receives no arguments this implementation can report, and
-// reporting none would be a claim rather than an absence.
+// Firmware supplies a console, a pool, a clock and the options an image was started with.
+// `openkal.process' waits for `openkal.fs' (a program is named through a directory handle);
+// the rest have no firmware service beneath them here.
 kal_u64 kal_interfaces(void) {
-    return KAL_IFACE_ABORT | KAL_IFACE_STREAM | KAL_IFACE_MEMORY;
+    return KAL_IFACE_ABORT | KAL_IFACE_STREAM | KAL_IFACE_MEMORY | KAL_IFACE_ENV | KAL_IFACE_TIME;
 }
 
 }

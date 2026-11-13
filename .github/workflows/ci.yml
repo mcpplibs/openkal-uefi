@@ -22,8 +22,8 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.8.27.1
-      XLINGS_VERSION: v2026.8.17.2
+      MCPP_VERSION: 2026.11.12.1
+      XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:
       - uses: actions/checkout@v4
@@ -202,6 +202,18 @@ jobs:
           }
           subst mcpp.toml .spec
           subst examples/hello/mcpp.toml ../../.spec
+      # THE PLATFORM, AS THE SPECIFICATION IS: its repository's branch of the same name, else its
+      # default branch, named by path in the example (the example states the released version).
+      - name: Point at the platform's working tree
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/mcpplibs/openkal-uefi-platform .platform
+          if git -C .platform rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
+            git -C .platform checkout --quiet "origin/$OPENKAL_BRANCH"
+          fi
+          f=examples/hello/mcpp.toml
+          sed "s|^platform = .*$|platform = { path = \"../../.platform\" }|" "$f" > "$f.next" && mv "$f.next" "$f"
+          grep -q 'path = "../../.platform"' "$f" || { echo "::error::$f was not substituted"; exit 1; }
       - name: Install OVMF and qemu
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
 
@@ -209,46 +221,32 @@ jobs:
         run: |
           set -euo pipefail
           cd examples/hello
-          mcpp build
-          EXE=$(find target -name "hello.exe" | head -1)
+          mcpp build --target x86_64-uefi
+          EFI=$(find target -name "hello.efi" | head -1)
+          RO=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-llvm/*/bin/llvm-readobj | sort -V | tail -1)
+          # Subsystem 10 (EFI application) is what firmware loads; no import table, since firmware
+          # satisfies no DLL.
+          "$RO" --file-headers "$EFI" | grep -q "IMAGE_SUBSYSTEM_EFI_APPLICATION"
+          if "$RO" --coff-imports "$EFI" | grep -qi "Name:"; then echo "::error::an import table"; exit 1; fi
 
-          # THE TOOLCHAIN THAT BUILT THE IMAGE, NOT LLVM.
-          #
-          # This target resolves to mingw-cross-gcc, so on a machine that has
-          # never built anything else there is no LLVM to borrow `llvm-readobj`
-          # from — the previous version of this step globbed for one and died on
-          # `ls: cannot access .../xim-x-llvm/*/bin/llvm-readobj`, AFTER the
-          # build had succeeded. The verification tool has to come from the same
-          # place as the compiler, or the check is only available on machines
-          # that happen to have another one.
-          OD=$(ls -d "$HOME"/.mcpp/registry/data/xpkgs/xim-x-mingw-cross-gcc/*/bin/x86_64-w64-mingw32-objdump | head -1)
-          test -x "$OD"
-
-          # Subsystem 10 is what makes firmware load it. A Windows console
-          # subsystem would build, link, and never be executed by UEFI.
-          # Measured spelling from this objdump: `Subsystem  0000000a  (EFI application)`.
-          "$OD" -p "$EXE" | grep -qE 'Subsystem[[:space:]]+0000000a'
-
-          # And no import table: a DLL dependency cannot be satisfied by firmware.
-          if "$OD" -p "$EXE" | grep -qi "DLL Name"; then
-            "$OD" -p "$EXE" | grep -i -A2 "DLL Name"; echo "unexpected DLL import"; exit 1
-          fi
-
-      - name: It boots under OVMF and prints
+      # THE STATUS COMES BACK. The platform's board exit writes it to QEMU's debug-exit port, which
+      # ends the emulator with (status << 1) | 1: the example ends with 42 when every check held.
+      - name: It boots under OVMF, runs to its end and returns its status
         run: |
           set -euo pipefail
           cd examples/hello
-          EXE=$(find target -name "hello.exe" | head -1)
-          mkdir -p esp/EFI/BOOT && cp "$EXE" esp/EFI/BOOT/BOOTX64.EFI
-          cp /usr/share/OVMF/OVMF_VARS_4M.fd vars.fd
-          timeout 90 qemu-system-x86_64 -machine q35 -m 256 -display none \
-            -serial file:uefi.log \
+          EFI=$(find target -name "hello.efi" | head -1)
+          mkdir -p esp/EFI/BOOT && cp "$EFI" esp/EFI/BOOT/BOOTX64.EFI
+          set +e
+          timeout 120 qemu-system-x86_64 -machine q35 -m 256 -nographic -no-reboot \
             -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-            -drive if=pflash,format=raw,file=vars.fd \
-            -drive format=raw,file=fat:rw:esp -net none || true
-          cat uefi.log | tr -d "\\000" | head -40
-          grep -q "hello from openkal over UEFI" uefi.log
-          grep -q "pool ok" uefi.log
+            -drive if=virtio,format=raw,readonly=on,file=fat:esp \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > uefi.log 2>&1
+          status=$?
+          set -e
+          tr -d '\000' < uefi.log | tail -20
+          grep -q "all held" uefi.log
+          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
 
   # ---------------------------------------------------------------------------
   # The cross-compilation is performed FROM three systems, not only from Linux.
@@ -280,7 +278,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-2022]
+        os: [macos-15, windows-2022]
     defaults:
       run:
         shell: bash
@@ -288,8 +286,8 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.8.27.1
-      XLINGS_VERSION: v2026.8.17.2
+      MCPP_VERSION: 2026.11.12.1
+      XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:
       - uses: actions/checkout@v4
@@ -477,13 +475,28 @@ jobs:
               || { echo "::error::$1 was not substituted"; exit 1; }
           }
           subst mcpp.toml .spec
+          subst examples/hello/mcpp.toml ../../.spec
+      # THE PLATFORM, AS THE SPECIFICATION IS: its repository's branch of the same name, else its
+      # default branch, named by path in the example (the example states the released version).
+      - name: Point at the platform's working tree
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/mcpplibs/openkal-uefi-platform .platform
+          if git -C .platform rev-parse --verify --quiet "origin/$OPENKAL_BRANCH" > /dev/null; then
+            git -C .platform checkout --quiet "origin/$OPENKAL_BRANCH"
+          fi
+          f=examples/hello/mcpp.toml
+          sed "s|^platform = .*$|platform = { path = \"../../.platform\" }|" "$f" > "$f.next" && mv "$f.next" "$f"
+          grep -q 'path = "../../.platform"' "$f" || { echo "::error::$f was not substituted"; exit 1; }
       - name: The EFI application cross-builds
         run: |
+          cd examples/hello
           # TWICE, AND THE FIRST IS ALLOWED TO FAIL — every row of this
           # matrix is a machine that has never targeted this triple, which is
           # precisely where mcpp's lazy install of the target C library shows.
           # The first build compiles sources needing its headers before they
           # exist; the second has them. A single build here reported a
           # portability failure that was really a cold-machine one.
-          mcpp build || true
-          mcpp build
+          mcpp build --target x86_64-uefi || true
+          mcpp build --target x86_64-uefi
+          test -n "$(find target -name hello.efi | head -1)"
