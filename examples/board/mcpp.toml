@@ -1,0 +1,68 @@
+# The board of this repository's example and CI: the `x86_64-uefi' row with no C library above
+# this implementation (its arrangement alone), QEMU's q35 with the edk2 firmware as its runner, and
+# the board's exit (board/qemu-exit.S) that returns a status through the debug-exit port. A test
+# fixture, not a published package: applications take the row from openkal-platform (0.28.0), over
+# openkal-musl and openkal-llvm-runtime. It was openkal-uefi-platform 0.1.0, folded here and into
+# openkal-platform; runtime/mem.S supplies the four memory functions a compiler calls, there being
+# no C library.
+[package]
+namespace   = "mcpplibs"
+name        = "uefi-board"
+version     = "0.1.0"
+description = "The board of openkal-uefi's example: the x86_64-uefi row with no C library, QEMU with the edk2 firmware"
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+mcpp        = ">=2026.11.12.1"
+
+[platform]
+targets   = ["x86_64-uefi"]
+toolchain = "llvm@23.1.3"
+
+
+# The board's runner: dirun boots the application as the firmware's default boot file and reads the
+# status the board exit writes to the debug-exit port. The emulator is qemu-x86's program, named by
+# path (a package's program is not on PATH; the package is built for each host below), and the
+# firmware is ovmf's code image (edk2's x86_64 firmware), the same file on every host. The code image
+# is a flash device (as `-bios' QEMU refuses it); the application's directory is a read-only virtio
+# disk (q35's own controller refuses a read-only drive, and a writable FAT image needs a temporary
+# file QEMU makes outside the run's directory). Measured: 0.43 s to the status under KVM.
+[platform.runner]
+cmd = ["dirun", "--payload", "{}", "--arch", "x86_64",
+       "--emulator", "{pkg:qemu-x86}/bin/qemu-system-x86_64", "--machine", "q35",
+       "--emulator-arg", "-drive", "--emulator-arg", "if=pflash,format=raw,readonly=on,file={pkg:ovmf}/share/edk2/edk2-x86_64-code.fd",
+       "--emulator-arg", "-drive", "--emulator-arg", "if=virtio,format=raw,readonly=on,file=fat:{dir}",
+       "--emulator-arg", "-device", "--emulator-arg", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+       "--place", "EFI/BOOT/BOOTX64.EFI", "--status", "debug-exit",
+       "--after", "BdsDxe: starting [^\\n]*\\n"]
+hosts    = ["linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"]
+requires = ["xim:dirun@0.3.1", "xim:qemu-x86@9.2.4-1", "xim:ovmf@9.2.4"]
+
+[[platform.define]]
+triple        = "x86_64-uefi"
+clang-triple  = "x86_64-unknown-uefi"
+object-format = "pe"
+execution     = "uefi"
+exe-suffix    = ".efi"
+
+[[platform.provider]]
+serves = ["x86_64-uefi"]
+
+# Freestanding: no C library, no red zone (firmware interrupts run on the application's stack),
+# 16-bit wide characters (UEFI's text is UCS-2), no stack probe calls (no runtime to supply
+# `__chkstk').
+[platform.build]
+ldflags  = ["-nostdlib", "-Wl,-entry:efi_main", "-Wl,-subsystem:efi_application"]
+cflags   = ["-ffreestanding", "-fshort-wchar", "-mno-red-zone", "-mno-stack-arg-probe"]
+cxxflags = ["-ffreestanding", "-fshort-wchar", "-mno-red-zone", "-mno-stack-arg-probe",
+            "-fno-exceptions", "-fno-rtti"]
+
+# The board's exit, and the block-memory functions a compiler calls (no C library here).
+[platform.link]
+driver = "compiler"
+inputs = [{ file = "board/qemu-exit.S" }, { file = "runtime/mem.S" }]
+
+[platform.layers]
+"kernel-abi"       = "openkal-uefi@0.10.0"
+"c-abi"            = false
+"c++-abi"          = false
+"compiler-runtime" = false

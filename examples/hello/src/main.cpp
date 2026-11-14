@@ -1,5 +1,5 @@
 // A UEFI application written against openkal, with no UEFI type in sight: a static initialiser,
-// the arguments, the two clocks, an over-aligned allocation, and a status the board carries out.
+// the arguments, the two clocks, two over-aligned allocations, and a status the board carries out.
 import openkal.stream;
 import openkal.abort;
 import openkal.memory;
@@ -32,6 +32,13 @@ int main(int argc, char**, char**) {
     void* p = kal_alloc(4096, 64);
     check(p != nullptr && (reinterpret_cast<kal_uintptr>(p) & 63) == 0, "an over-aligned allocation");
     kal_free(p, 4096, 64);
+    // An alignment of a page or more is pages placed at it (0.10.0), which over-allocating would
+    // have cost in backed memory (a C library's allocator states 256 MiB for an arena; 16 MiB here
+    // fits the 256 MiB machine this example boots in).
+    void* arena = kal_alloc(4u << 20, 16u << 20);
+    check(arena != nullptr && (reinterpret_cast<kal_uintptr>(arena) & ((16u << 20) - 1)) == 0,
+          "an allocation aligned to 16 MiB");
+    kal_free(arena, 4u << 20, 16u << 20);
     const kal_duration t0 = kal_time_monotonic();
     kal_time_sleep(20u * 1000u * 1000u);
     const kal_duration t1 = kal_time_monotonic();

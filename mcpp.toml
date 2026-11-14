@@ -15,7 +15,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-uefi"
-version     = "0.9.0"
+version     = "0.10.0"
 description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
 license     = "Apache-2.0"
 
@@ -28,14 +28,27 @@ license     = "Apache-2.0"
 # package answers to; several packages answer to it and the engine knows none
 # of them by name.
 provides    = ["mcpp:kernel-abi=openkal"]
-# The interfaces this implementation provides, which `kal_interfaces()' answers too (src/version.cpp).
-provides-interfaces = ["openkal.abort", "openkal.env", "openkal.memory", "openkal.stream", "openkal.time"]
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-uefi"
+
+# The interfaces this implementation provides, which `kal_interfaces()' answers too
+# (src/version.cpp). 0.9.0 stated the list as a key of [package], where the engine does not read
+# it, so a consumer bound every interface (openkal-run then referred to fifteen this
+# implementation does not have); the list belongs to [kernel-abi].
+[kernel-abi]
+provides-interfaces = ["openkal.abort", "openkal.env", "openkal.exec", "openkal.memory", "openkal.stream", "openkal.time"]
 
 [dependencies]
 # Every patch release of the specification's minor version (openkal clause 8).
 openkal = "^0.25.0"
+
+# The program's entry belongs to this implementation in both arrangements. With
+# no C library it runs the image's initialisers and calls `main`; `standalone`
+# (0.10.0) is the arrangement beneath a C library written above openkal
+# (openkal-musl names it so on `cfg(os = "uefi")`), whose `__libc_start_main`
+# receives the program and does both.
+[features]
+standalone = { defines = ["OKUEFI_STANDALONE"] }
 
 [build]
 flags = [
