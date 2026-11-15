@@ -8,8 +8,9 @@
 // Firmware that offers no such protocol maps every page writable and executable, and has nothing to
 // change: publishing is then a statement the caller makes, as the interface allows.
 //
-// A file cannot be mapped (there is no openkal.fs here), so kal_exec_map_part answers
-// kal_err_not_supported, a property of the environment.
+// A part is not made a file's: the firmware maps nothing, and openkal.fs (0.11.0) reads a file's
+// bytes, which a loader copies into the region itself. KAL_EXEC_PROP_FILE is not claimed, and
+// kal_exec_map_part answers kal_err_not_supported, a property of the environment.
 #include <openkal/exec.h>
 #include <openkal/types.h>
 

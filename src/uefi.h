@@ -167,7 +167,8 @@ static_assert(__builtin_offsetof(efi_runtime_services, get_time) == 24);
 
 /* EFI_LOADED_IMAGE_PROTOCOL: what the firmware recorded about this image, and
  * among it the options it was started with (UCS-2 text when a shell or a boot
- * option gives a command line). */
+ * option gives a command line) and the device it was loaded from (the volume
+ * openkal.fs supplies). */
 struct efi_loaded_image_protocol {
     efi_u32     revision;
     efi_handle  parent_handle;
@@ -180,6 +181,7 @@ struct efi_loaded_image_protocol {
     void*       image_base;
     unsigned long long image_size;
 };
+static_assert(__builtin_offsetof(efi_loaded_image_protocol, device_handle) == 24);
 static_assert(__builtin_offsetof(efi_loaded_image_protocol, load_options_size) == 48);
 static_assert(__builtin_offsetof(efi_loaded_image_protocol, load_options) == 56);
 
@@ -222,5 +224,134 @@ inline constexpr efi_guid kMemoryAttributeProtocol = {
     0xf4560cf6, 0x40ec, 0x4b4a, {0xa1, 0x92, 0xbf, 0x1d, 0x57, 0xd0, 0xb1, 0x89}};
 inline constexpr unsigned long long EFI_MEMORY_XP = 0x0000000000004000ull;
 inline constexpr unsigned long long EFI_MEMORY_RO = 0x0000000000020000ull;
+
+/* EFI status codes this implementation distinguishes (UEFI 2.10, appendix D). The high bit marks an
+ * error; a warning has it clear and is not a failure. */
+inline constexpr efi_status EFI_INVALID_PARAMETER = 0x8000000000000002ULL;
+inline constexpr efi_status EFI_UNSUPPORTED       = 0x8000000000000003ULL;
+inline constexpr efi_status EFI_BAD_BUFFER_SIZE   = 0x8000000000000004ULL;
+inline constexpr efi_status EFI_NOT_READY         = 0x8000000000000006ULL;
+inline constexpr efi_status EFI_DEVICE_ERROR      = 0x8000000000000007ULL;
+inline constexpr efi_status EFI_WRITE_PROTECTED   = 0x8000000000000008ULL;
+inline constexpr efi_status EFI_OUT_OF_RESOURCES  = 0x8000000000000009ULL;
+inline constexpr efi_status EFI_VOLUME_CORRUPTED  = 0x800000000000000AULL;
+inline constexpr efi_status EFI_VOLUME_FULL       = 0x800000000000000BULL;
+inline constexpr efi_status EFI_NO_MEDIA          = 0x800000000000000CULL;
+inline constexpr efi_status EFI_MEDIA_CHANGED     = 0x800000000000000DULL;
+inline constexpr efi_status EFI_NOT_FOUND         = 0x800000000000000EULL;
+inline constexpr efi_status EFI_ACCESS_DENIED     = 0x800000000000000FULL;
+/* Delete closed the handle and did not delete the file (EFI_FILE_PROTOCOL.Delete). */
+inline constexpr efi_status EFI_WARN_DELETE_FAILURE = 2;
+inline constexpr bool efi_error(efi_status s) { return (s >> 63) != 0; }
+
+/* EFI_SIMPLE_FILE_SYSTEM_PROTOCOL (UEFI 2.10, 13.4): a volume, opened once for its root directory. */
+struct efi_file_protocol;
+struct efi_simple_file_system_protocol {
+    unsigned long long revision;                                                              /* 0 */
+    efi_status (*open_volume)(efi_simple_file_system_protocol*, efi_file_protocol** root);   /* 8 */
+};
+static_assert(__builtin_offsetof(efi_simple_file_system_protocol, open_volume) == 8);
+inline constexpr efi_guid kSimpleFileSystemProtocol = {
+    0x964E5B22, 0x6459, 0x11D2, {0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}};
+
+/* EFI_FILE_PROTOCOL (UEFI 2.10, 13.5): a file or a directory open on a volume, each operation a
+ * member of the handle itself. As far as Flush; the revision-2 members (OpenEx and those after it)
+ * are asynchronous forms this implementation does not use. */
+struct efi_file_protocol {
+    unsigned long long revision;                                                                 /*  0 */
+    efi_status (*open)(efi_file_protocol*, efi_file_protocol** out, const efi_char16* name,
+                       unsigned long long mode, unsigned long long attributes);                  /*  8 */
+    efi_status (*close)(efi_file_protocol*);                                                     /* 16 */
+    efi_status (*remove)(efi_file_protocol*);       /* Delete: closes the handle in every case       24 */
+    efi_status (*read)(efi_file_protocol*, efi_uintn* size, void* buffer);                       /* 32 */
+    efi_status (*write)(efi_file_protocol*, efi_uintn* size, const void* buffer);                /* 40 */
+    efi_status (*get_position)(efi_file_protocol*, unsigned long long* position);                /* 48 */
+    efi_status (*set_position)(efi_file_protocol*, unsigned long long position);                 /* 56 */
+    efi_status (*get_info)(efi_file_protocol*, const efi_guid* type, efi_uintn* size, void* buffer);  /* 64 */
+    efi_status (*set_info)(efi_file_protocol*, const efi_guid* type, efi_uintn size, const void* buffer);  /* 72 */
+    efi_status (*flush)(efi_file_protocol*);                                                     /* 80 */
+};
+static_assert(__builtin_offsetof(efi_file_protocol, open) == 8);
+static_assert(__builtin_offsetof(efi_file_protocol, close) == 16);
+static_assert(__builtin_offsetof(efi_file_protocol, remove) == 24);
+static_assert(__builtin_offsetof(efi_file_protocol, read) == 32);
+static_assert(__builtin_offsetof(efi_file_protocol, write) == 40);
+static_assert(__builtin_offsetof(efi_file_protocol, get_position) == 48);
+static_assert(__builtin_offsetof(efi_file_protocol, set_position) == 56);
+static_assert(__builtin_offsetof(efi_file_protocol, get_info) == 64);
+static_assert(__builtin_offsetof(efi_file_protocol, set_info) == 72);
+static_assert(__builtin_offsetof(efi_file_protocol, flush) == 80);
+
+/* Open modes and attributes of EFI_FILE_PROTOCOL.Open. A mode is READ, READ|WRITE or
+ * READ|WRITE|CREATE; writing alone is not one. */
+inline constexpr unsigned long long EFI_FILE_MODE_READ   = 0x0000000000000001ULL;
+inline constexpr unsigned long long EFI_FILE_MODE_WRITE  = 0x0000000000000002ULL;
+inline constexpr unsigned long long EFI_FILE_MODE_CREATE = 0x8000000000000000ULL;
+inline constexpr unsigned long long EFI_FILE_READ_ONLY   = 0x0000000000000001ULL;
+inline constexpr unsigned long long EFI_FILE_DIRECTORY   = 0x0000000000000010ULL;
+/* SetPosition to this value places the position at the end of the file. */
+inline constexpr unsigned long long EFI_FILE_POSITION_END = 0xFFFFFFFFFFFFFFFFULL;
+
+/* EFI_FILE_INFO (UEFI 2.10, 13.5.16): what GetInfo answers of a node, and what a directory's Read
+ * gives for each entry. The name follows the fixed part and ends in a NUL; `size' counts both. */
+struct efi_file_info {
+    unsigned long long size;              /*  0 */
+    unsigned long long file_size;         /*  8 */
+    unsigned long long physical_size;     /* 16 */
+    efi_time           create_time;       /* 24 */
+    efi_time           last_access_time;  /* 40 */
+    efi_time           modification_time; /* 56 */
+    unsigned long long attribute;         /* 72 */
+    efi_char16         file_name[1];      /* 80 */
+};
+static_assert(__builtin_offsetof(efi_file_info, file_size) == 8);
+static_assert(__builtin_offsetof(efi_file_info, modification_time) == 56);
+static_assert(__builtin_offsetof(efi_file_info, attribute) == 72);
+static_assert(__builtin_offsetof(efi_file_info, file_name) == 80, "SIZE_OF_EFI_FILE_INFO is 80");
+inline constexpr efi_uintn kFileInfoFixed = 80;
+inline constexpr efi_guid kFileInfo = {
+    0x09576E92, 0x6D3F, 0x11D2, {0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}};
+
+/* EFI_FILE_SYSTEM_INFO (UEFI 2.10, 13.5.17): the volume a handle is on. */
+struct efi_file_system_info {
+    unsigned long long size;          /*  0 */
+    efi_u8             read_only;     /*  8 */
+    unsigned long long volume_size;   /* 16 */
+    unsigned long long free_space;    /* 24 */
+    efi_u32            block_size;    /* 32 */
+    efi_char16         volume_label[1];  /* 36 */
+};
+static_assert(__builtin_offsetof(efi_file_system_info, read_only) == 8);
+static_assert(__builtin_offsetof(efi_file_system_info, volume_size) == 16);
+static_assert(__builtin_offsetof(efi_file_system_info, free_space) == 24);
+static_assert(__builtin_offsetof(efi_file_system_info, volume_label) == 36);
+inline constexpr efi_guid kFileSystemInfo = {
+    0x09576E93, 0x6D3F, 0x11D2, {0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}};
+
+/* EFI_RNG_PROTOCOL (UEFI 2.10, 37.5): the firmware's source of random bytes. A null algorithm asks
+ * for the source's default. */
+struct efi_rng_protocol {
+    efi_status (*get_info)(efi_rng_protocol*, efi_uintn* list_size, efi_guid* list);       /* 0 */
+    efi_status (*get_rng)(efi_rng_protocol*, const efi_guid* algorithm, efi_uintn length,
+                          efi_u8* value);                                                   /* 8 */
+};
+static_assert(__builtin_offsetof(efi_rng_protocol, get_rng) == 8);
+inline constexpr efi_guid kRngProtocol = {
+    0x3152BCA5, 0xEADE, 0x433D, {0x86, 0x2E, 0xC0, 0x1C, 0xDC, 0x29, 0x1F, 0x44}};
+
+/* EFI_SHELL_PARAMETERS_PROTOCOL (UEFI Shell 2.2, 2.3): what the UEFI Shell installs on the image
+ * handle of an application it starts --- the command line already divided into arguments by the
+ * Shell's own rules (quotes and its escape character removed), each UCS-2. */
+struct efi_shell_parameters_protocol {
+    efi_char16** argv;      /*  0 */
+    efi_uintn    argc;      /*  8 */
+    void*        std_in;    /* 16 */
+    void*        std_out;   /* 24 */
+    void*        std_err;   /* 32 */
+};
+static_assert(__builtin_offsetof(efi_shell_parameters_protocol, argv) == 0);
+static_assert(__builtin_offsetof(efi_shell_parameters_protocol, argc) == 8);
+inline constexpr efi_guid kShellParametersProtocol = {
+    0x752F3136, 0x4E16, 0x4FDC, {0xA2, 0x2A, 0xE5, 0xF4, 0x68, 0x12, 0xF4, 0xCA}};
 
 #endif /* OPENKAL_UEFI_H */

@@ -62,7 +62,7 @@ driver = "compiler"
 inputs = [{ file = "board/qemu-exit.S" }, { file = "runtime/mem.S" }]
 
 [platform.layers]
-"kernel-abi"       = "openkal-uefi@0.10.0"
+"kernel-abi"       = "openkal-uefi@0.11.0"
 "c-abi"            = false
 "c++-abi"          = false
 "compiler-runtime" = false

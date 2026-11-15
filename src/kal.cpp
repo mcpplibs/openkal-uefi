@@ -10,6 +10,8 @@
 //   openkal.stream   SIMPLE_TEXT_OUTPUT_PROTOCOL / SIMPLE_TEXT_INPUT_PROTOCOL
 //   openkal.memory   AllocatePool / FreePool
 //   openkal.abort    Exit
+//   openkal.fs       SIMPLE_FILE_SYSTEM_PROTOCOL / FILE_PROTOCOL (fs.cpp, 0.11.0)
+//   openkal.random   RNG_PROTOCOL (random.cpp, 0.11.0)
 //
 // `process` and `task` are absent because UEFI has no process model — an
 // application is the only thing running, and an interface provided in part
@@ -131,6 +133,7 @@ kal_stream kal_stderr(void) { return kal_stream{kStderr}; }
 
 kal_intptr kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
     if (!g_st) return -kal_err_io;
+    if (okuefi::file_stream(s.h)) return okuefi::file_write(s.h, buf, n);
     efi_simple_text_output_protocol* out =
         s.h == kStdout ? g_st->con_out
       : s.h == kStderr ? error_console()
@@ -145,19 +148,24 @@ kal_intptr kal_stream_write(kal_stream s, const void* buf, kal_uintptr n) {
 // loses every key that is not a plain character. Returning "no bytes, no error"
 // is end of input, which is the truthful reading of a console this
 // implementation does not attempt to interpret.
-kal_intptr kal_stream_read(kal_stream s, void*, kal_uintptr) {
+//
+// A file's stream (openkal.fs, 0.11.0) is read from the file.
+kal_intptr kal_stream_read(kal_stream s, void* buf, kal_uintptr n) {
+    if (okuefi::file_stream(s.h)) return okuefi::file_read(s.h, buf, n);
     if (s.h != kStdin) return -kal_err_invalid;
     return 0;
 }
 
 // The console is unbuffered by this implementation; the bytes were handed to
-// firmware when the write returned.
+// firmware when the write returned. A file's stream is flushed by the firmware.
 int kal_stream_flush(kal_stream s) {
+    if (okuefi::file_stream(s.h)) return okuefi::file_flush(s.h);
     if (s.h != kStdin && s.h != kStdout && s.h != kStderr) return kal_err_invalid;
     return kal_ok;
 }
 
 kal_uintptr kal_stream_props(kal_stream s) {
+    if (okuefi::file_stream(s.h)) return 0;
     if (s.h != kStdin && s.h != kStdout && s.h != kStderr) return 0;
     return KAL_STREAM_PROP_INTERACTIVE;
 }

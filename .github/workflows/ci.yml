@@ -22,7 +22,7 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.11.12.1
+      MCPP_VERSION: 2026.11.15.1
       XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:
@@ -202,8 +202,11 @@ jobs:
           }
           subst mcpp.toml .spec
           subst examples/hello/mcpp.toml ../../.spec
-      - name: Install OVMF and qemu
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86
+          subst examples/std/mcpp.toml ../../.spec
+      # mtools and dosfstools make the writable FAT volume the Shell runs from (0.11.0), and read
+      # back what the program left on it.
+      - name: Install OVMF, qemu and the FAT tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ovmf qemu-system-x86 mtools dosfstools
 
       - name: The example is a real EFI application
         run: |
@@ -235,6 +238,69 @@ jobs:
           tr -d '\000' < uefi.log | tail -20
           grep -q "all held" uefi.log
           [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+
+      # THROUGH THE UEFI SHELL (0.11.0). With no default boot file, OVMF starts its Shell, which runs
+      # startup.nsh from the volume: the program is started by name with a quoted argument, on a
+      # writable FAT volume, with a virtual random device for the firmware's RNG protocol. The
+      # example checks the Shell's arguments (`"a b"' is one), writes, reads, renames, lists and
+      # removes on its own volume, and fills bytes from the random source; the host then reads the
+      # file it left.
+      - name: Started by the UEFI Shell, it receives the Shell's arguments and uses its volume
+        run: |
+          set -euo pipefail
+          cd examples/hello
+          EFI=$(find target -name "hello.efi" | head -1)
+          rm -f shell.img
+          mkfs.vfat -C -n OKUEFI shell.img 65536 > /dev/null
+          printf '@echo -off\r\nfs0:\r\nhello.efi --shell "a b" c\r\n' > startup.nsh
+          mcopy -i shell.img "$EFI" ::/hello.efi
+          mcopy -i shell.img startup.nsh ::/startup.nsh
+          set +e
+          timeout 180 qemu-system-x86_64 -machine q35 -m 256 -nographic -no-reboot \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive if=virtio,format=raw,file=shell.img -device virtio-rng-pci \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > shell.log 2>&1
+          status=$?
+          set -e
+          tr -d '\000' < shell.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -70
+          grep -q "a quoted argument with a space is one argument" shell.log
+          grep -q "the firmware's random source fills bytes" shell.log
+          grep -q "all held" shell.log
+          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+          mdir -i shell.img ::/okfs
+          mtype -i shell.img ::/okfs/kept.txt | tr -d '\r' | grep -qx "kept by openkal-uefi" \
+            || { echo "::error::okfs/kept.txt was not left on the volume as written"; exit 1; }
+
+      # BENEATH THE C LIBRARY (0.11.0): examples/std, `import std' on openkal-platform's row with
+      # this implementation in place of the released one. The Shell's arguments reach `main', files
+      # are written through the standard library, and std::random_device draws on the firmware's
+      # source; mimalloc, the C library's allocator, warns when it finds no secure random source,
+      # and the warning is required to be absent.
+      - name: Beneath the C library, through the Shell, with no random-source warning
+        run: |
+          set -euo pipefail
+          cd examples/std
+          mcpp build --target x86_64-uefi
+          EFI=$(find target -name "std.efi" | head -1)
+          rm -f std.img
+          mkfs.vfat -C -n OKSTD std.img 65536 > /dev/null
+          printf '@echo -off\r\nfs0:\r\nstd.efi --shell "a b" c\r\n' > startup.nsh
+          mcopy -i std.img "$EFI" ::/std.efi
+          mcopy -i std.img startup.nsh ::/startup.nsh
+          set +e
+          timeout 180 qemu-system-x86_64 -machine q35 -m 1024 -nographic -no-reboot \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive if=virtio,format=raw,file=std.img -device virtio-rng-pci \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > std.log 2>&1
+          status=$?
+          set -e
+          tr -d '\000' < std.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -30
+          if grep -qi "secure randomness" std.log; then
+            echo "::error::the C library's allocator found no secure random source"; exit 1
+          fi
+          grep -q "all held" std.log
+          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+          mtype -i std.img ::/okstd/written.txt | tr -d '\r' | grep -qx "written through the C library"
 
   # ---------------------------------------------------------------------------
   # The cross-compilation is performed FROM three systems, not only from Linux.
@@ -274,7 +340,7 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.11.12.1
+      MCPP_VERSION: 2026.11.15.1
       XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:

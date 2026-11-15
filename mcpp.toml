@@ -15,7 +15,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-uefi"
-version     = "0.10.0"
+version     = "0.11.0"
 description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
 license     = "Apache-2.0"
 
@@ -36,7 +36,8 @@ repo        = "https://github.com/mcpplibs/openkal-uefi"
 # it, so a consumer bound every interface (openkal-run then referred to fifteen this
 # implementation does not have); the list belongs to [kernel-abi].
 [kernel-abi]
-provides-interfaces = ["openkal.abort", "openkal.env", "openkal.exec", "openkal.memory", "openkal.stream", "openkal.time"]
+provides-interfaces = ["openkal.abort", "openkal.env", "openkal.exec", "openkal.fs", "openkal.memory",
+                       "openkal.random", "openkal.stream", "openkal.time"]
 
 [dependencies]
 # Every patch release of the specification's minor version (openkal clause 8).
@@ -50,9 +51,14 @@ openkal = "^0.25.0"
 [features]
 standalone = { defines = ["OKUEFI_STANDALONE"] }
 
+# No stack probes (0.11.0): the firmware's stack is committed in whole, and no run-time beneath
+# this implementation defines `__chkstk', which a frame larger than a page otherwise calls (a name
+# of openkal.fs is converted in a buffer of 2 KiB on the stack). The example's board states it for
+# the whole program; a row that does not still links this implementation.
 [build]
 flags = [
   { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti",
                                  "-fno-stack-protector",
-                                 "-fno-asynchronous-unwind-tables"] },
+                                 "-fno-asynchronous-unwind-tables",
+                                 "-mno-stack-arg-probe"] },
 ]
