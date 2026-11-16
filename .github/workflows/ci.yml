@@ -252,7 +252,7 @@ jobs:
           EFI=$(find target -name "hello.efi" | head -1)
           rm -f shell.img
           mkfs.vfat -C -n OKUEFI shell.img 65536 > /dev/null
-          printf '@echo -off\r\nfs0:\r\nhello.efi --shell "a b" c\r\n' > startup.nsh
+          printf '@echo -off\r\nfs0:\r\nhello.efi --shell "a b" c "two   words here"\r\n' > startup.nsh
           mcopy -i shell.img "$EFI" ::/hello.efi
           mcopy -i shell.img startup.nsh ::/startup.nsh
           set +e
@@ -264,6 +264,7 @@ jobs:
           set -e
           tr -d '\000' < shell.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -70
           grep -q "a quoted argument with a space is one argument" shell.log
+          grep -q "a run of blanks in a long argument arrives whole" shell.log
           grep -q "the firmware's random source fills bytes" shell.log
           grep -q "all held" shell.log
           [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
@@ -284,7 +285,7 @@ jobs:
           EFI=$(find target -name "std.efi" | head -1)
           rm -f std.img
           mkfs.vfat -C -n OKSTD std.img 65536 > /dev/null
-          printf '@echo -off\r\nfs0:\r\nstd.efi --shell "a b" c\r\n' > startup.nsh
+          printf '@echo -off\r\nfs0:\r\nstd.efi --shell "a b" c "two   words here"\r\n' > startup.nsh
           mcopy -i std.img "$EFI" ::/std.efi
           mcopy -i std.img startup.nsh ::/startup.nsh
           set +e

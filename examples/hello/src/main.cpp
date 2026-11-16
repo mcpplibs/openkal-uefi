@@ -3,7 +3,7 @@
 // source of random bytes, and a status the board carries out.
 //
 // Started as the firmware's default boot file, it reads its own volume (read-only under the
-// board's runner). Started by the UEFI Shell as `hello.efi --shell "a b" c' (CI's startup.nsh, on
+// board's runner). Started by the UEFI Shell as `hello.efi --shell "a b" c "two   words here"' (CI's startup.nsh, on
 // a writable FAT volume), it also checks the Shell's arguments, writes, renames and removes files
 // and directories, leaves okfs/kept.txt for the host to read, and requires a random source.
 import openkal.stream;
@@ -189,9 +189,11 @@ int main(int argc, char** argv, char**) {
     check(argc >= 1 && kal_env_arg_count() == static_cast<kal_uintptr>(argc), "the arguments are counted alike");
     const bool shell = argc > 1 && same(argv[1], length(argv[1]), "--shell");
     if (shell) {
-        check(argc == 4, "the Shell gave four arguments");
-        check(argc == 4 && same(argv[2], length(argv[2]), "a b"), "a quoted argument with a space is one argument");
-        check(argc == 4 && same(argv[3], length(argv[3]), "c"), "and the one after it is the next");
+        check(argc == 5, "the Shell gave five arguments");
+        check(argc == 5 && same(argv[2], length(argv[2]), "a b"), "a quoted argument with a space is one argument");
+        check(argc == 5 && same(argv[3], length(argv[3]), "c"), "and the one after it is the next");
+        // 0.11.1: the Shell's own division shortens this one (ten characters or more, three blanks).
+        check(argc == 5 && same(argv[4], length(argv[4]), "two   words here"), "a run of blanks in a long argument arrives whole");
     }
     void* p = kal_alloc(4096, 64);
     check(p != nullptr && (reinterpret_cast<kal_uintptr>(p) & 63) == 0, "an over-aligned allocation");

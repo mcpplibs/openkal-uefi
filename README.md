@@ -46,11 +46,19 @@ or closes a part in which they do not, `^` takes the next character as it is.
 0.10.0 divided the load options at spaces alone, so `"a b"` arrived as two
 arguments with their quotes. Firmware that gave none gives one empty name.
 
+From 0.11.1 the arguments after the name are divided from the load options where
+the Shell started the program too. The Shell of edk2 9.2.4 was measured to hand
+over a shortened argument where it has ten or more characters and a run of three
+or more blanks (`"two   words"` arrives without its end), and the load options of
+the same image hold the line as written. The Shell's division is what remains
+where the load options are not text or divide into another number of arguments;
+the name is the Shell's in both cases.
+
 | openkal | UEFI |
 |---|---|
 | `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` (UCS-2, `\n` as CR LF); input reports its end |
 | `memory` | `AllocatePool` / `FreePool`, over-allocated for an alignment below a page; pages for a page or more, placed at the alignment from the memory map (0.10.0) |
-| `env` | the Shell's `EFI_SHELL_PARAMETERS_PROTOCOL`, else the load options divided with quotes (0.11.0); no variables, image, loader or system name (absent) |
+| `env` | the load options divided with quotes, the name from the Shell's `EFI_SHELL_PARAMETERS_PROTOCOL` (0.11.1); no variables, image, loader or system name (absent) |
 | `fs` | `SIMPLE_FILE_SYSTEM_PROTOCOL` of the volume the image was loaded from (`LoadedImage->DeviceHandle`), its root the one directory supplied, named `/`; `FILE_PROTOCOL` for opening, transfers, `GetInfo`/`SetInfo` (size, time, rename), `Delete`, and a directory's reads for a listing (0.11.0) |
 | `random` | `RNG_PROTOCOL` (`LocateProtocol`, the source's default algorithm); firmware without one answers `kal_err_not_supported` (0.11.0) |
 | `time` | `GetTime` for the wall clock; the processor's counter, measured against `Stall`, for the monotonic one; `Stall` for a sleep |

@@ -151,11 +151,28 @@ void from_load_options(const efi_loaded_image_protocol* li) {
     s.argv = argv;
 }
 
+// WHICH OF THE TWO (0.11.1). The Shell of edk2 9.2.4 was measured to hand over a shortened argument
+// where the argument has ten or more characters and a run of three or more blanks: `"two   words"'
+// arrives without its end. The load options of the same image hold the command line as it was
+// written, so the arguments after the name are divided from them here, and the Shell's own
+// division is what remains where the load options are not text or divide into another number of
+// arguments (a Shell that hands over something other than the line). The name stays the Shell's:
+// it is the path the Shell resolved, where the load options hold the word that was typed.
 void record_arguments(efi_handle image, const efi_loaded_image_protocol* li) {
+    okuefi::state& s = okuefi::self();
     void* p = nullptr;
-    if (okuefi::self().st->boot_services->handle_protocol(image, &kShellParametersProtocol, &p) == EFI_SUCCESS && p)
+    if (s.st->boot_services->handle_protocol(image, &kShellParametersProtocol, &p) == EFI_SUCCESS && p)
         from_shell(static_cast<const efi_shell_parameters_protocol*>(p));
-    if (okuefi::self().argc == 0) from_load_options(li);
+    const int shell_argc = s.argc;
+    char** const shell_argv = s.argv;
+    from_load_options(li);
+    if (shell_argc == 0 || s.argv == shell_argv) return;
+    if (s.argc == shell_argc) {
+        s.argv[0] = shell_argv[0];
+        return;
+    }
+    s.argc = shell_argc;
+    s.argv = shell_argv;
 }
 
 }  // namespace
