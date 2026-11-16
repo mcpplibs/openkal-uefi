@@ -1,7 +1,7 @@
 // A UEFI application in C++23 beneath the C library and C++ run-time of openkal-platform's row,
 // over this implementation: the Shell's arguments as `main' receives them, files and a directory
 // through the standard library (openkal.fs), and std::random_device, which with the C library's
-// allocator draws on openkal.random. Started by the UEFI Shell as `std.efi --shell "a b" c'.
+// allocator draws on openkal.random. Started by the UEFI Shell as `std.efi --shell "a b" c "two   words here"'.
 import std;
 
 namespace {
@@ -15,7 +15,7 @@ void check(bool ok, std::string_view what) {
 int main(int argc, char** argv) {
     std::println("hello from the C library over openkal-uefi");
     const std::vector<std::string_view> args(argv, argv + argc);
-    check(args.size() == 4 && args[1] == "--shell" && args[2] == "a b" && args[3] == "c",
+    check(args.size() == 5 && args[1] == "--shell" && args[2] == "a b" && args[3] == "c" && args[4] == "two   words here",
           "main receives the Shell's arguments, a quoted one whole");
 
     namespace fs = std::filesystem;
