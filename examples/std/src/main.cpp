@@ -42,6 +42,19 @@ int main(int argc, char** argv) {
     check(line == "written through the C library", "a file is written and read back");
     check(fs::file_size("/okstd/written.txt") == 30, "its size");
 
+    // A listing gives whole names and a file is renamed (0.11.2): both measure a UTF-16 name, and
+    // on the release profile the measuring loop was replaced by the C library's `wcslen'.
+    { std::ofstream note("/okstd/note.txt"); note << "n\n"; }
+    std::error_code ec;
+    fs::rename("/okstd/note.txt", "/okstd/moved-note.txt", ec);
+    check(!ec, "a file is renamed beneath a directory");
+    std::vector<std::string> beneath;
+    for (const auto& e : fs::directory_iterator("/okstd")) beneath.push_back(lower(e.path().filename().string()));
+    std::ranges::sort(beneath);
+    std::println("  beneath okstd: {}", beneath);
+    check(beneath == std::vector<std::string>{"moved-note.txt", "written.txt"}, "a listing gives each name whole, with its extension");
+    fs::remove("/okstd/moved-note.txt", ec);
+
     std::random_device rd;
     const auto a = rd(), b = rd(), c = rd();
     check(!(a == b && b == c), "std::random_device draws on the firmware's source");

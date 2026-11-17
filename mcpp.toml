@@ -15,7 +15,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-uefi"
-version     = "0.11.1"
+version     = "0.11.2"
 description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
 license     = "Apache-2.0"
 
@@ -55,10 +55,18 @@ standalone = { defines = ["OKUEFI_STANDALONE"] }
 # this implementation defines `__chkstk', which a frame larger than a page otherwise calls (a name
 # of openkal.fs is converted in a buffer of 2 KiB on the stack). The example's board states it for
 # the whole program; a row that does not still links this implementation.
+#
+# No loop is replaced by a call (0.11.2), which is what `-fno-builtin' is for. The row's compiler
+# reads `wchar_t' as sixteen bits and replaces a loop that measures a UTF-16 name by a call of
+# `wcslen'; the C library above this implementation is built with a `wchar_t' of thirty-two bits,
+# and its `wcslen' answered another length. Measured on the release profile: a listing gave
+# `f2.' for `f2.txt', and a rename, whose new name is measured the same way, was refused by the
+# firmware (EFI_ACCESS_DENIED). The dev profile does not optimise the loop and showed neither.
 [build]
 flags = [
   { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti",
                                  "-fno-stack-protector",
                                  "-fno-asynchronous-unwind-tables",
-                                 "-mno-stack-arg-probe"] },
+                                 "-mno-stack-arg-probe",
+                                 "-fno-builtin"] },
 ]

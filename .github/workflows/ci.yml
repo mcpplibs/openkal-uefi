@@ -281,27 +281,32 @@ jobs:
         run: |
           set -euo pipefail
           cd examples/std
-          mcpp build --target x86_64-uefi
-          EFI=$(find target -name "std.efi" | head -1)
-          rm -f std.img
-          mkfs.vfat -C -n OKSTD std.img 65536 > /dev/null
-          printf '@echo -off\r\nfs0:\r\nstd.efi --shell "a b" c "two   words here"\r\n' > startup.nsh
-          mcopy -i std.img "$EFI" ::/std.efi
-          mcopy -i std.img startup.nsh ::/startup.nsh
-          set +e
-          timeout 180 qemu-system-x86_64 -machine q35 -m 1024 -nographic -no-reboot \
-            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-            -drive if=virtio,format=raw,file=std.img -device virtio-rng-pci \
-            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > std.log 2>&1
-          status=$?
-          set -e
-          tr -d '\000' < std.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -30
-          if grep -qi "secure randomness" std.log; then
-            echo "::error::the C library's allocator found no secure random source"; exit 1
-          fi
-          grep -q "all held" std.log
-          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
-          mtype -i std.img ::/okstd/written.txt | tr -d '\r' | grep -qx "written through the C library"
+          # Both profiles (0.11.2): the release profile replaced a loop over a UTF-16 name by the
+          # C library's `wcslen', and the dev profile showed nothing of it.
+          for profile in "" "--release"; do
+            rm -rf target
+            mcpp build $profile --target x86_64-uefi
+            EFI=$(find target -name "std.efi" | head -1)
+            rm -f std.img
+            mkfs.vfat -C -n OKSTD std.img 65536 > /dev/null
+            printf '@echo -off\r\nfs0:\r\nstd.efi --shell "a b" c "two   words here"\r\n' > startup.nsh
+            mcopy -i std.img "$EFI" ::/std.efi
+            mcopy -i std.img startup.nsh ::/startup.nsh
+            set +e
+            timeout 180 qemu-system-x86_64 -machine q35 -m 1024 -nographic -no-reboot \
+              -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+              -drive if=virtio,format=raw,file=std.img -device virtio-rng-pci \
+              -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > std.log 2>&1
+            status=$?
+            set -e
+            tr -d '\000' < std.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -30
+            if grep -qi "secure randomness" std.log; then
+              echo "::error::the C library's allocator found no secure random source"; exit 1
+            fi
+            grep -q "all held" std.log
+            [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+            mtype -i std.img ::/okstd/written.txt | tr -d '\r' | grep -qx "written through the C library"
+          done
 
   # ---------------------------------------------------------------------------
   # The cross-compilation is performed FROM three systems, not only from Linux.

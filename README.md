@@ -46,6 +46,12 @@ or closes a part in which they do not, `^` takes the next character as it is.
 0.10.0 divided the load options at spaces alone, so `"a b"` arrived as two
 arguments with their quotes. Firmware that gave none gives one empty name.
 
+From 0.11.2 the implementation is compiled with `-fno-builtin`. On the release
+profile the compiler replaced the loop that measures a UTF-16 name by a call of
+`wcslen`, which the C library above defines for a `wchar_t` of thirty-two bits:
+a listing gave `f2.` for `f2.txt`, and the firmware refused a rename
+(`EFI_ACCESS_DENIED`). The C library example runs on both profiles in CI.
+
 From 0.11.1 the arguments after the name are divided from the load options where
 the Shell started the program too. The Shell of edk2 9.2.4 was measured to hand
 over a shortened argument where it has ten or more characters and a run of three
