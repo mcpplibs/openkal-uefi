@@ -60,6 +60,15 @@ the same image hold the line as written. The Shell's division is what remains
 where the load options are not text or divide into another number of arguments;
 the name is the Shell's in both cases.
 
+0.12.0 is written against openkal 0.26, and nothing but the specification's
+version changes. What 0.26 requires is of `openkal.process`, which this
+implementation does not provide: a start bounded by the environment alone
+(clause 7.6) and a unit claimed only where a reference can be made (clause
+7.18). The side of clause 7.6 that is here already holds: the arguments a
+program receives are kept in pool memory of their measured size, whether the
+Shell divided them or the load options are divided here, so no table bounds
+their number or their length.
+
 | openkal | UEFI |
 |---|---|
 | `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` (UCS-2, `\n` as CR LF); input reports its end |

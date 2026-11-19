@@ -7,7 +7,7 @@ kind = "bin"
 main = "src/main.cpp"
 
 [dependencies]
-openkal = "^0.25.0"
+openkal = "^0.26.0"
 openkal-uefi = { path = "../..", override = true }
 
 [target.x86_64-uefi]
