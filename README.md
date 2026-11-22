@@ -5,14 +5,14 @@ firmware loads before an operating system exists.
 
 A program names the target and nothing else. The row `x86_64-uefi`, its compile
 and link conventions and its runner are the openkal platform's
-([openkal-platform][plat] 0.28.0): the same C library and C++ run-time as on
-every other system, openkal-musl and openkal-llvm-runtime, with this
-implementation beneath them, so a UEFI application is written in C++23 with
-`import std`:
+([openkal-platform][plat], from 0.28.0; 0.32.0 holds this release): the same C
+library and C++ run-time as on every other system, openkal-musl and
+openkal-llvm-runtime, with this implementation beneath them, so a UEFI
+application is written in C++23 with `import std`:
 
 ```toml
 [target.x86_64-uefi]
-platform = "openkal-platform@0.28.0"
+platform = "openkal-platform@0.32.0"
 ```
 
 ```sh
@@ -62,9 +62,9 @@ the name is the Shell's in both cases.
 
 0.12.0 is written against openkal 0.26, and nothing but the specification's
 version changes. What 0.26 requires is of `openkal.process`, which this
-implementation does not provide: a start bounded by the environment alone
-(clause 7.6) and a unit claimed only where a reference can be made (clause
-7.18). The side of clause 7.6 that is here already holds: the arguments a
+implementation did not provide until 0.13.0: a start bounded by the environment
+alone (clause 7.6) and a unit claimed only where a reference can be made
+(clause 7.18). The side of clause 7.6 that is here already holds: the arguments a
 program receives are kept in pool memory of their measured size, whether the
 Shell divided them or the load options are divided here, so no table bounds
 their number or their length.
@@ -73,21 +73,60 @@ their number or their length.
 |---|---|
 | `stream` | `SIMPLE_TEXT_OUTPUT_PROTOCOL` (UCS-2, `\n` as CR LF); input reports its end |
 | `memory` | `AllocatePool` / `FreePool`, over-allocated for an alignment below a page; pages for a page or more, placed at the alignment from the memory map (0.10.0) |
-| `env` | the load options divided with quotes, the name from the Shell's `EFI_SHELL_PARAMETERS_PROTOCOL` (0.11.1); no variables, image, loader or system name (absent) |
+| `env` | the load options divided with quotes, the name from the Shell's `EFI_SHELL_PARAMETERS_PROTOCOL` (0.11.1); the variables a starter of this implementation gave (0.13.0), none otherwise; no image, loader or system name (absent) |
+| `process` | `LoadImage` and `StartImage` of a program found through `fs`, run to its end before the start returns (0.13.0) |
 | `fs` | `SIMPLE_FILE_SYSTEM_PROTOCOL` of the volume the image was loaded from (`LoadedImage->DeviceHandle`), its root the one directory supplied, named `/`; `FILE_PROTOCOL` for opening, transfers, `GetInfo`/`SetInfo` (size, time, rename), `Delete`, and a directory's reads for a listing (0.11.0) |
 | `random` | `RNG_PROTOCOL` (`LocateProtocol`, the source's default algorithm); firmware without one answers `kal_err_not_supported` (0.11.0) |
 | `time` | `GetTime` for the wall clock; the processor's counter, measured against `Stall`, for the monotonic one; `Stall` for a sleep |
 | `abort` | `Exit` with the status as a warning code, so a starter reads the number |
 
-`process` is not provided. What it needs of `fs` is present from 0.11.0: a
-program is found by name beneath a directory, and `LoadImage` and `StartImage`
-start it, the second returning when the started image returns, which is the
-specification's property for an environment with one task
-(`KAL_PROCESS_PROP_RUNS_TO_END`, openkal 0.25.1 clause 7.19). What remains is the
-interface itself: the vector passed as the started image's load options, quoted
-so that the division above recovers it (clause 7.6); the three streams, which
-`StartImage` cannot redirect; and the grants of clause 7.13. The rest have no
-firmware service beneath them.
+## Starting a program (0.13.0)
+
+`openkal.process` is provided. A program found by name beneath a directory
+(`openkal.fs`) is loaded by `LoadImage`, from the device path of the volume with
+a media file path node naming it, and run by `StartImage`, which returns when
+the started image calls `Exit`. The firmware has one task, so
+`kal_process_spawn` returns after the started program has ended and
+`kal_process_wait` answers its status at once (`KAL_PROCESS_PROP_RUNS_TO_END`,
+openkal clause 7.19); `TERMINATE` and `CHANNEL` are not claimed, and
+`BOUND_LIFETIME` is, a started program being unable to outlive its starter.
+`EXIT_STATUS` and `ONE_STRING` are claimed.
+
+| what a start gives | how it reaches the started image |
+|---|---|
+| the vector | its load options: each element that holds a blank, a double quote or `^`, or is empty, is quoted, its `"` and `^` preceded by `^`, so the division above recovers it; `KAL_SPAWN_ONE_STRING` joins the elements after the first as they are |
+| the variables | the start record, installed on the started image's handle under a GUID of this implementation before `StartImage` and removed after it; a program of this implementation reads its variables there, one of another kind receives its load options alone |
+| the directory it runs in | the start record: the started program's first preopen, named by its path from the root (`/okp`), with the root after it |
+| the resource preference | `KAL_RESOURCES` among the variables, which `kal_env_resources` reads |
+| its status | `Exit`'s status: a program of this implementation ends with its status as a warning code; an abort is `EFI_ABORTED`, reported as an end the program did not choose, with 134 |
+
+The three streams are the firmware's consoles, which `StartImage` gives every
+image: a stream placed at another position and the null device are refused with
+`kal_err_not_supported`, as are grants, a unit and confinement, none of which
+is claimed. A start that cannot happen is refused by its reason before the
+firmware is asked: a name that is not there, a directory, a file that is not an
+image (`EFI_LOAD_ERROR`, `kal_err_not_program`), an entry without `=`.
+
+Nothing bounds a start but the firmware's load options, whose size is thirty-two
+bits (clause 7.6): the command line, the record and the table of started
+programs are sized by what a start gives.
+
+AT ITS END A PROGRAM RETURNS WHAT IT HOLDS. The firmware frees an application's
+image when it exits and nothing the application allocated, so every program's
+pool and pages stayed taken until the machine restarted: measured with 1 GiB, a
+program that started copies of itself which each reserved 128 MiB, as the C
+library's allocator reserves an arena, could start six. Every block of the pool
+is now preceded by its link in a list and every range of pages is a row of a
+table; `kal_exit` and `kal_abort` close the files and directories still open and
+return both, and twenty such starts succeed. Pages of code are made writable
+and not executable again before they are returned. The board's exit
+(`okuefi_board_exit`) is the session's: a program another program started ends
+into its starter, and only one the firmware or the Shell started carries its
+status off the machine.
+
+From 0.13.0 the arguments are the program's own memory too, and a program for
+whose arguments there is none ends with that reason; before, it ran with none
+and was not told.
 
 ## The volume (0.11.0)
 
@@ -145,8 +184,9 @@ GUIDs from the UEFI and UEFI Shell specifications.
 ## Interfaces (0.11.0)
 
 `[kernel-abi] provides-interfaces` states `openkal.abort`, `openkal.env`,
-`openkal.exec`, `openkal.fs`, `openkal.memory`, `openkal.random`,
-`openkal.stream` and `openkal.time`, and `kal_interfaces()` answers the same
+`openkal.exec`, `openkal.fs`, `openkal.memory`, `openkal.process` (0.13.0),
+`openkal.random`, `openkal.stream` and `openkal.time`, and `kal_interfaces()`
+answers the same
 (0.9.0 stated the list as a key of `[package]`, where the engine does not read
 it; 0.11.0 adds `openkal.fs` and `openkal.random`). `openkal.exec` is pages of
 type `EfiLoaderCode`, protected through the memory attribute protocol where the
@@ -192,13 +232,29 @@ into another, refuses a rename that does not replace and an exclusive create
 onto names that exist, sets and reads a modification time, reads the volume's
 capacity, and leaves `okfs/kept.txt`, which the host reads; the random source
 fills bytes. `examples/std`, `import std` beneath openkal-musl 0.29.6 and
-openkal-llvm-runtime 0.20.3 on openkal-platform 0.28.0's row with this
+openkal-llvm-runtime 0.20.3 on openkal-platform 0.28.0's row (0.31.2's from 0.13.0, the group of openkal 0.26) with this
 implementation in place of the released one, receives the Shell's arguments in
 `main`, reports `/` as its working directory, lists it through
 `std::filesystem`, writes and reads a file through `std::ofstream` and
 `std::ifstream`, and draws from `std::random_device`; mimalloc's warning that it
 is "unable to use secure randomness", printed above 0.10.0, is absent, and
 appears again, with `std::random_device` failing, on firmware with no source.
+
+0.13.0, measured with mcpp 2026.11.22.1 under QEMU's q35 with the edk2 firmware
+9.2.4 (the same steps run in CI with Ubuntu's OVMF). `examples/starts`, with no
+C library, started by the Shell from a writable FAT volume, starts copies of
+itself: one receives 1208 arguments, among them `a b`, `"quoted"`, `^caret^`,
+an empty one and one with a tab, and 1200 variables, unaltered, and returns 7;
+one aborts and is reported ended with 134; one runs in `okp`, finds it as its
+first preopen named `/okp` and writes a file there, which its starter finds; one
+reads the preference `economy`; twenty each take 128 MiB without freeing it; an
+absent name, a directory, a file that is no image, a placed stream and an entry
+without `=` are refused by their reasons. `examples/spawn`, C beneath
+openkal-musl 0.30.0 on openkal-platform 0.31.2's row with this implementation in
+place of the released one, sets a variable with `setenv`, moves its directory
+with `chdir`, starts itself by `posix_spawn` with `a b` and an empty argument,
+and reads the copy's status 3 with `waitpid`; `posix_spawn` of an absent name is
+`ENOENT`.
 
 [kal]: https://github.com/mcpplibs/openkal
 [plat]: https://github.com/mcpplibs/openkal-platform

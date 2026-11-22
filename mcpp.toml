@@ -15,7 +15,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-uefi"
-version     = "0.12.0"
+version     = "0.13.0"
 description = "An implementation of openkal on UEFI Boot Services, for applications the firmware loads before an operating system exists"
 license     = "Apache-2.0"
 
@@ -37,7 +37,7 @@ repo        = "https://github.com/mcpplibs/openkal-uefi"
 # implementation does not have); the list belongs to [kernel-abi].
 [kernel-abi]
 provides-interfaces = ["openkal.abort", "openkal.env", "openkal.exec", "openkal.fs", "openkal.memory",
-                       "openkal.random", "openkal.stream", "openkal.time"]
+                       "openkal.process", "openkal.random", "openkal.stream", "openkal.time"]
 
 [dependencies]
 # Every patch release of the specification's minor version (openkal clause 8).

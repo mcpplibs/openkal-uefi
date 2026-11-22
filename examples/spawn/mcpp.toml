@@ -1,0 +1,14 @@
+[package]
+name    = "spawn"
+version = "0.1.0"
+
+[targets.spawn]
+kind = "bin"
+main = "src/main.c"
+
+[dependencies]
+openkal = "^0.26.0"
+openkal-uefi = { path = "../..", override = true }
+
+[target.x86_64-uefi]
+platform = "openkal-platform@0.31.2"

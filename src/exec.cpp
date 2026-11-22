@@ -42,6 +42,7 @@ void* reserve(int how, unsigned long long at, kal_uintptr size) {
     const kal_uintptr pages = pages_of(size);
     if (okuefi::self().st->boot_services->allocate_pages(how, EfiLoaderCode, pages, &address) != EFI_SUCCESS)
         return nullptr;
+    if (!okuefi::pages_taken(address, pages, true)) return nullptr;
     auto* p = reinterpret_cast<unsigned char*>(address);
     for (kal_uintptr i = 0; i < pages * kPage; ++i) p[i] = 0;
     if (auto* a = attributes())
@@ -61,6 +62,12 @@ int protect(void* region, kal_uintptr offset, kal_uintptr size, bool execute) {
 }
 
 }  // namespace
+
+namespace okuefi {
+void exec_unprotect(unsigned long long at, kal_uintptr pages) {
+    if (auto* a = attributes()) a->clear_memory_attributes(a, at, pages * kPage, EFI_MEMORY_RO | EFI_MEMORY_XP);
+}
+}  // namespace okuefi
 
 extern "C" {
 
@@ -93,10 +100,11 @@ int kal_exec_map_part(void*, kal_uintptr, kal_uintptr, struct kal_file, kal_u64,
 
 void kal_exec_free(void* p, kal_uintptr size) {
     if (!p || size == 0) return;
-    if (auto* a = attributes())
-        a->clear_memory_attributes(a, reinterpret_cast<unsigned long long>(p), pages_of(size) * kPage,
-                                   EFI_MEMORY_RO | EFI_MEMORY_XP);
-    okuefi::self().st->boot_services->free_pages(reinterpret_cast<unsigned long long>(p), pages_of(size));
+    const auto at = reinterpret_cast<unsigned long long>(p);
+    const kal_uintptr recorded = okuefi::pages_returned(at);
+    const kal_uintptr pages = recorded ? recorded : pages_of(size);
+    okuefi::exec_unprotect(at, pages);
+    okuefi::self().st->boot_services->free_pages(at, pages);
 }
 
 // Placement at a chosen address is offered (AllocateAddress); publishing again is not.

@@ -247,6 +247,33 @@ kal_uintptr root() {
     return g_root = h;
 }
 
+// THE DIRECTORY THE PROGRAM RUNS IN (0.13.0): the one its starter named (start.cpp, the start
+// record), opened beneath the root once and held as the first preopen; zero where the program runs
+// at the root, or was started by anything but a program of this implementation.
+kal_uintptr g_work = 0;
+bool g_work_asked = false;
+
+kal_uintptr work() {
+    if (g_work && take(g_work, kDir)) return g_work;
+    if (g_work_asked) return 0;
+    g_work_asked = true;
+    const efi_char16* path = okuefi::self().work;
+    if (!path || !path[0]) return 0;
+    node* r = take(root(), kDir);
+    if (!r) return 0;
+    efi_file_protocol* f = nullptr;
+    if (r->f->open(r->f, &f, path, EFI_FILE_MODE_READ, 0) != EFI_SUCCESS || !f) {
+        okuefi::say("openkal-uefi: the directory the program was started in could not be opened; "
+                    "it runs at the volume's root\n");
+        return 0;
+    }
+    const kal_uintptr h = issue(kDir, f);
+    efi_char16* copy = h ? joined(nullptr, path) : nullptr;
+    if (!copy) { if (h) retire(*take(h, kDir)); f->close(f); return 0; }
+    take(h, kDir)->path = copy;
+    return g_work = h;
+}
+
 // Opens `name' beneath a directory with the firmware's mode; "." is the directory itself.
 efi_status open_beneath(node* d, const name16& name, unsigned long long mode, unsigned long long attributes,
                         efi_file_protocol** out) {
@@ -333,20 +360,92 @@ int file_flush(kal_uintptr h) {
     const efi_status s = f->f->flush(f->f);
     return s == EFI_SUCCESS ? kal_ok : error_of(s);
 }
+
+// THE FIRMWARE'S NAME OF A PROGRAM (openkal.process, 0.13.0): the path from the volume's root of
+// `name' beneath `base', with its leading separator, in memory the caller releases with kal_free;
+// or the reason there is none to start: a name that is absent, a directory, a name refused here.
+int program_name(kal_dir base, const char* name, kal_uintptr len, efi_char16** out) {
+    *out = nullptr;
+    node* d = take(base.h, kDir);
+    const name16 n(name, len);
+    if (!d || !n.ok() || n.self()) return kal_err_invalid;
+    efi_file_protocol* f = nullptr;
+    const efi_status s = open_beneath(d, n, EFI_FILE_MODE_READ, 0, &f);
+    if (s != EFI_SUCCESS) return error_of(s);
+    int r = kal_ok;
+    {
+        file_info fi(f);
+        if (!fi.info) r = error_of(fi.status);
+        else if (is_directory(fi.info)) r = kal_err_is_directory;
+    }
+    f->close(f);
+    if (r != kal_ok) return r;
+    efi_char16* rel = joined(d->path, n.w);
+    if (!rel) return kal_err_no_memory;
+    const kal_uintptr k = length16(rel);
+    auto* p = static_cast<efi_char16*>(kal_alloc((k + 2) * sizeof(efi_char16), alignof(efi_char16)));
+    if (p) {
+        p[0] = u'\\';
+        for (kal_uintptr i = 0; i <= k; ++i) p[1 + i] = rel[i];
+    }
+    kal_free(rel, 0, 0);
+    *out = p;
+    return p ? kal_ok : kal_err_no_memory;
+}
+
+// A directory's path from the volume's root (`""' for the root), held by the table; null for a word
+// that is not a directory's.
+const efi_char16* directory_name(kal_dir d) {
+    node* n = take(d.h, kDir);
+    return n ? n->path : nullptr;
+}
+
+// AT THE PROGRAM'S END (0.13.0): every file, directory and listing still open is closed, so that a
+// program started by another leaves the volume as a program that closed its handles would.
+void close_all() {
+    for (unsigned i = 0; i < kSlots; ++i) {
+        node& n = g_nodes[i];
+        if (n.kind == kFree) continue;
+        if (n.f) n.f->close(n.f);
+        n.f = nullptr;
+        n.kind = kFree;
+    }
+    g_root = 0;
+    g_work = 0;
+}
 }  // namespace okuefi
 
 extern "C" {
 
 // ── directories ─────────────────────────────────────────────────────────────
 
-kal_uintptr kal_fs_preopen_count(void) { return root() ? 1 : 0; }
+kal_uintptr kal_fs_preopen_count(void) {
+    if (!root()) return 0;
+    return work() ? 2 : 1;
+}
 
+// The directory the program runs in first, where its starter named one beneath the root, and the
+// root after it (0.13.0); the root alone otherwise.
 int kal_fs_preopen(kal_uintptr index, kal_dir* out, char* name_out, kal_uintptr name_cap,
                    kal_uintptr* name_len) {
-    if (index != 0 || !out) return kal_err_invalid;
-    const kal_uintptr h = root();
-    if (!h) return kal_err_invalid;
-    *out = kal_dir{h};
+    if (!out || !root()) return kal_err_invalid;
+    const kal_uintptr w = work();
+    if (index > (w ? 1u : 0u)) return kal_err_invalid;
+    if (w && index == 0) {
+        const efi_char16* path = take(w, kDir)->path;
+        const kal_uintptr units = length16(path);
+        const kal_uintptr bytes = 1 + okuefi::utf8_length(path, units);
+        if (name_out && name_cap) {
+            name_out[0] = '/';
+            if (name_cap > 1) okuefi::to_utf8(path, units, name_out + 1, name_cap - 1);
+            for (kal_uintptr i = 1; i < bytes && i < name_cap; ++i)
+                if (name_out[i] == '\\') name_out[i] = '/';
+        }
+        if (name_len) *name_len = bytes;
+        *out = kal_dir{w};
+        return kal_ok;
+    }
+    *out = kal_dir{root()};
     if (name_out && name_cap) name_out[0] = '/';
     if (name_len) *name_len = 1;
     return kal_ok;
