@@ -5,6 +5,7 @@
 // program like any other: its static initialisers run, then `main(argc, argv, envp)`, and its
 // status is the status of `kal_exit`.
 #include <openkal/abort.h>
+#include <openkal/memory.h>
 
 #include "uefi.h"
 #include "state.h"
@@ -79,11 +80,16 @@ bool printable(const efi_char16* w, efi_uintn n) {
     return true;
 }
 
+// THE ARGUMENTS ARE THE PROGRAM'S MEMORY, released at its end (0.13.0). Where there is none for
+// them the program does not run without them: it ends with the reason (0.13.0; before, it ran with
+// no arguments and was not told).
 template <class T>
 T* pool(efi_uintn count) {
-    void* p = nullptr;
-    if (okuefi::self().st->boot_services->allocate_pool(EfiLoaderData, count * sizeof(T), &p) != EFI_SUCCESS)
-        return nullptr;
+    void* p = kal_alloc(count * sizeof(T), alignof(T));
+    if (!p) {
+        static constexpr char why[] = "openkal-uefi: no memory for the program's arguments";
+        kal_abort(why, sizeof why - 1);
+    }
     return static_cast<T*>(p);
 }
 
@@ -99,7 +105,6 @@ void from_shell(const efi_shell_parameters_protocol* sp) {
     }
     char* text = pool<char>(bytes);
     char** argv = pool<char*>(sp->argc + 1);
-    if (!text || !argv) return;
     char* o = text;
     for (efi_uintn i = 0; i < sp->argc; ++i) {
         const efi_char16* a = sp->argv[i] ? sp->argv[i] : u"";
@@ -126,7 +131,6 @@ void from_load_options(const efi_loaded_image_protocol* li) {
     efi_char16* part = pool<efi_char16>(n + 1);
     char* text = pool<char>(okuefi::utf8_length(w, n) + n + 1);
     char** argv = pool<char*>(n / 2 + 2);
-    if (!part || !text || !argv) return;
     int argc = 0;
     efi_uintn at = 0;
     char* o = text;
@@ -145,7 +149,7 @@ void from_load_options(const efi_loaded_image_protocol* li) {
         o += okuefi::to_utf8(part, k, o, okuefi::utf8_length(part, k));
         *o++ = '\0';
     }
-    s.st->boot_services->free_pool(part);
+    kal_free(part, 0, alignof(efi_char16));
     argv[argc] = nullptr;
     s.argc = argc;
     s.argv = argv;
@@ -196,6 +200,16 @@ extern "C" efi_status efi_main(efi_handle image, efi_system_table* st) {
     if (st->boot_services->handle_protocol(image, &kLoadedImageProtocol, reinterpret_cast<void**>(&li)) != EFI_SUCCESS)
         li = nullptr;
     s.device = li ? li->device_handle : nullptr;
+    // STARTED BY A PROGRAM OF THIS IMPLEMENTATION (0.13.0): its record states the variables and the
+    // directory this one runs in (state.h). A later version appends to the record and keeps these.
+    void* record = nullptr;
+    if (st->boot_services->handle_protocol(image, &okuefi::kStartRecord, &record) == EFI_SUCCESS && record) {
+        const auto* r = static_cast<const okuefi::start_record*>(record);
+        if (r->magic == okuefi::kStartMagic && r->version >= 1 && r->size >= sizeof *r) {
+            s.start = r;
+            s.work = r->work;
+        }
+    }
     record_arguments(image, li);
     // Position zero is the name the program was started by; firmware that gave none gives an empty
     // name rather than none (openkal.env), in both arrangements.

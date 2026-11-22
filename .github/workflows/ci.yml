@@ -22,7 +22,7 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.11.15.1
+      MCPP_VERSION: 2026.11.22.1
       XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:
@@ -203,6 +203,8 @@ jobs:
           subst mcpp.toml .spec
           subst examples/hello/mcpp.toml ../../.spec
           subst examples/std/mcpp.toml ../../.spec
+          subst examples/starts/mcpp.toml ../../.spec
+          subst examples/spawn/mcpp.toml ../../.spec
       # mtools and dosfstools make the writable FAT volume the Shell runs from (0.11.0), and read
       # back what the program left on it.
       - name: Install OVMF, qemu and the FAT tools
@@ -308,6 +310,63 @@ jobs:
             mtype -i std.img ::/okstd/written.txt | tr -d '\r' | grep -qx "written through the C library"
           done
 
+      # A PROGRAM STARTS PROGRAMS (0.13.0): examples/starts, with no C library, started by the Shell
+      # from a writable FAT volume, starts copies of itself through LoadImage and StartImage. A copy
+      # receives 1208 arguments and 1200 variables unaltered, aborts, runs in okp and writes a file
+      # there, reads a resource preference; twenty copies each take 128 MiB and end without freeing
+      # it, which only the return of a program's memory at its end lets 1 GiB hold; a start that
+      # cannot happen is refused by its reason.
+      - name: It starts programs, each run to its end before the start returns
+        run: |
+          set -euo pipefail
+          cd examples/starts
+          mcpp build --target x86_64-uefi
+          EFI=$(find target -name "starts.efi" | head -1)
+          rm -f starts.img
+          mkfs.vfat -C -n OKSTARTS starts.img 65536 > /dev/null
+          printf '@echo -off\r\nfs0:\r\nstarts.efi\r\n' > startup.nsh
+          mcopy -i starts.img "$EFI" ::/starts.efi
+          mcopy -i starts.img startup.nsh ::/startup.nsh
+          set +e
+          timeout 300 qemu-system-x86_64 -machine q35 -m 1024 -nographic -no-reboot \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive if=virtio,format=raw,file=starts.img \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > starts.log 2>&1
+          status=$?
+          set -e
+          tr -d '\000' < starts.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -30
+          if grep -q "FAIL" starts.log; then echo "::error::a check of examples/starts failed"; exit 1; fi
+          grep -q "all held" starts.log
+          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+          mtype -i starts.img ::/okp/here.txt | grep -qx "here" \
+            || { echo "::error::okp/here.txt was not left by the copy that ran there"; exit 1; }
+
+      # BENEATH THE C LIBRARY (0.13.0): examples/spawn, C on openkal-platform's row with this
+      # implementation in place of the released one: posix_spawn starts the program again with a
+      # variable set by setenv and a directory set by chdir, and waitpid reads its status.
+      - name: Beneath the C library, posix_spawn and waitpid
+        run: |
+          set -euo pipefail
+          cd examples/spawn
+          mcpp build --target x86_64-uefi
+          EFI=$(find target -name "spawn.efi" | head -1)
+          rm -f spawn.img
+          mkfs.vfat -C -n OKSPAWN spawn.img 65536 > /dev/null
+          printf '@echo -off\r\nfs0:\r\nspawn.efi\r\n' > startup.nsh
+          mcopy -i spawn.img "$EFI" ::/spawn.efi
+          mcopy -i spawn.img startup.nsh ::/startup.nsh
+          set +e
+          timeout 300 qemu-system-x86_64 -machine q35 -m 2048 -nographic -no-reboot \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+            -drive if=virtio,format=raw,file=spawn.img -device virtio-rng-pci \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 -net none < /dev/null > spawn.log 2>&1
+          status=$?
+          set -e
+          tr -d '\000' < spawn.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v '^Press ESC' | tail -20
+          if grep -q "FAIL" spawn.log; then echo "::error::a check of examples/spawn failed"; exit 1; fi
+          grep -q "all held" spawn.log
+          [ "$status" -eq 85 ] || { echo "::error::QEMU ended with $status, not 85 (42 << 1 | 1)"; exit 1; }
+
   # ---------------------------------------------------------------------------
   # The cross-compilation is performed FROM three systems, not only from Linux.
   #
@@ -346,7 +405,7 @@ jobs:
       # The specification is taken from the branch of the same name where one
       # exists, so a change spanning both repositories is reviewed as a whole.
       OPENKAL_BRANCH: ${{ github.head_ref || github.ref_name }}
-      MCPP_VERSION: 2026.11.15.1
+      MCPP_VERSION: 2026.11.22.1
       XLINGS_VERSION: v2026.10.26.1
       XLINGS_NON_INTERACTIVE: '1'
     steps:

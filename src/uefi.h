@@ -99,20 +99,24 @@ struct efi_boot_services {
     void* signal_event;                      /* 104 */
     void* close_event;                       /* 112 */
     void* check_event;                       /* 120 */
-    void* install_protocol_interface;        /* 128 */
+    efi_status (*install_protocol_interface)(efi_handle* handle, const struct efi_guid* protocol,
+                                             int interface_type, void* iface);  /* 128 */
     void* reinstall_protocol_interface;      /* 136 */
-    void* uninstall_protocol_interface;      /* 144 */
+    efi_status (*uninstall_protocol_interface)(efi_handle handle, const struct efi_guid* protocol,
+                                               void* iface);                    /* 144 */
     efi_status (*handle_protocol)(efi_handle, const struct efi_guid*, void**);  /* 152 */
     void* reserved;                          /* 160 */
     void* register_protocol_notify;          /* 168 */
     void* locate_handle;                     /* 176 */
     void* locate_device_path;                /* 184 */
     void* install_configuration_table;       /* 192 */
-    void* load_image;                        /* 200 */
-    void* start_image;                       /* 208 */
+    efi_status (*load_image)(unsigned char boot_policy, efi_handle parent, const void* device_path,
+                             void* source, efi_uintn source_size, efi_handle* image);  /* 200 */
+    efi_status (*start_image)(efi_handle image, efi_uintn* exit_data_size,
+                              efi_char16** exit_data);                       /* 208 */
     efi_status (*exit)(efi_handle image, efi_status status,
                        efi_uintn data_size, efi_char16* data);  /* 216 */
-    void* unload_image;                      /* 224 */
+    efi_status (*unload_image)(efi_handle image);  /* 224 */
     void* exit_boot_services;                /* 232 */
     void* get_next_monotonic_count;          /* 240 */
     efi_status (*stall)(efi_uintn microseconds);                       /* 248 */
@@ -141,6 +145,13 @@ static_assert(__builtin_offsetof(efi_boot_services, allocate_pages) == 40);
 static_assert(__builtin_offsetof(efi_boot_services, free_pages) == 48);
 static_assert(__builtin_offsetof(efi_boot_services, get_memory_map) == 56);
 static_assert(__builtin_offsetof(efi_boot_services, locate_protocol) == 320);
+static_assert(__builtin_offsetof(efi_boot_services, install_protocol_interface) == 128);
+static_assert(__builtin_offsetof(efi_boot_services, uninstall_protocol_interface) == 144);
+static_assert(__builtin_offsetof(efi_boot_services, load_image) == 200);
+static_assert(__builtin_offsetof(efi_boot_services, start_image) == 208);
+static_assert(__builtin_offsetof(efi_boot_services, unload_image) == 224);
+/* EFI_INTERFACE_TYPE: the one there is. */
+inline constexpr int EFI_NATIVE_INTERFACE = 0;
 
 /* EFI_ALLOCATE_TYPE and EFI_MEMORY_TYPE: the two this implementation asks for. */
 enum { AllocateAnyPages = 0, AllocateAddress = 2 };
@@ -240,6 +251,8 @@ inline constexpr efi_status EFI_NO_MEDIA          = 0x800000000000000CULL;
 inline constexpr efi_status EFI_MEDIA_CHANGED     = 0x800000000000000DULL;
 inline constexpr efi_status EFI_NOT_FOUND         = 0x800000000000000EULL;
 inline constexpr efi_status EFI_ACCESS_DENIED     = 0x800000000000000FULL;
+inline constexpr efi_status EFI_LOAD_ERROR        = 0x8000000000000001ULL;
+inline constexpr efi_status EFI_SECURITY_VIOLATION = 0x800000000000001AULL;
 /* Delete closed the handle and did not delete the file (EFI_FILE_PROTOCOL.Delete). */
 inline constexpr efi_status EFI_WARN_DELETE_FAILURE = 2;
 inline constexpr bool efi_error(efi_status s) { return (s >> 63) != 0; }
@@ -353,5 +366,21 @@ static_assert(__builtin_offsetof(efi_shell_parameters_protocol, argv) == 0);
 static_assert(__builtin_offsetof(efi_shell_parameters_protocol, argc) == 8);
 inline constexpr efi_guid kShellParametersProtocol = {
     0x752F3136, 0x4E16, 0x4FDC, {0xA2, 0x2A, 0xE5, 0xF4, 0x68, 0x12, 0xF4, 0xCA}};
+
+/* EFI_DEVICE_PATH_PROTOCOL (UEFI 2.10, 10.2): a path is a series of nodes, each a type, a subtype
+ * and its own length in two bytes (little-endian, unaligned), ended by the node of type 0x7F and
+ * subtype 0xFF. A volume's handle carries the path of its device; an image on it is named by that
+ * path with a media file path node (type 4, subtype 4: a UCS-2 name from the volume's root,
+ * terminated) before the end, which is what LoadImage is given. */
+struct efi_device_path_node {
+    efi_u8 type;
+    efi_u8 subtype;
+    efi_u8 length[2];
+};
+static_assert(sizeof(efi_device_path_node) == 4);
+inline constexpr efi_u8 kDevicePathEnd = 0x7F, kDevicePathEndAll = 0xFF;
+inline constexpr efi_u8 kDevicePathMedia = 0x04, kDevicePathFile = 0x04;
+inline constexpr efi_guid kDevicePathProtocol = {
+    0x09576E91, 0x6D3F, 0x11D2, {0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}};
 
 #endif /* OPENKAL_UEFI_H */

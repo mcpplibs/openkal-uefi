@@ -12,12 +12,14 @@
 //   openkal.abort    Exit
 //   openkal.fs       SIMPLE_FILE_SYSTEM_PROTOCOL / FILE_PROTOCOL (fs.cpp, 0.11.0)
 //   openkal.random   RNG_PROTOCOL (random.cpp, 0.11.0)
+//   openkal.process  LoadImage / StartImage (process.cpp, 0.13.0)
 //
-// `process` and `task` are absent because UEFI has no process model — an
+// `task` is absent because UEFI has no second context to run --- an
 // application is the only thing running, and an interface provided in part
-// would be worse than one provided not at all. `import openkal.process;` does
-// not resolve, which is the honest answer rather than a set of calls that
-// always fail.
+// would be worse than one provided not at all. `process` is LoadImage and
+// StartImage (process.cpp, 0.13.0): a started program runs to its end before
+// its starter resumes, which the specification states as a property (clause
+// 7.19) rather than as an absence.
 //
 // THE ONE PLACE THIS IS NOT FORWARDING: TEXT.
 //
@@ -104,7 +106,28 @@ efi_simple_text_output_protocol* error_console() {
 }
 }  // namespace
 
+namespace okuefi {
+void say(const char* text) {
+    if (!g_st || !text) return;
+    kal_uintptr n = 0;
+    while (text[n]) ++n;
+    write_to(error_console(), reinterpret_cast<const unsigned char*>(text), n);
+}
+}  // namespace okuefi
+
 extern "C" {
+
+// THE PROGRAM'S END (0.13.0). What the program holds is returned first --- its files closed, its
+// memory freed (release_memory) --- so that a starter that follows it finds the volume and the
+// memory as before the start. The board's exit is the session's: a program another program started
+// ends into its starter, which reads the status from StartImage, and only a program the firmware or
+// the Shell started carries its status off the machine.
+static void end_program(efi_status status, int code) {
+    okuefi::close_all();
+    okuefi::release_memory();
+    if (!okuefi::self().start) okuefi_board_exit(code);
+    g_st->boot_services->exit(g_image, status, 0, nullptr);
+}
 
 KAL_NORETURN void kal_abort(const char* msg, kal_uintptr len) {
     if (g_st && msg && len)
@@ -112,17 +135,18 @@ KAL_NORETURN void kal_abort(const char* msg, kal_uintptr len) {
     if (g_st) {
         const unsigned char nl = '\n';
         write_to(error_console(), &nl, 1);
+        okuefi::close_all();
+        okuefi::release_memory();
         g_st->boot_services->exit(g_image, EFI_ABORTED, 0, nullptr);
     }
     for (;;) {}
 }
 
 KAL_NORETURN void kal_exit(int code) {
-    okuefi_board_exit(code);
     // The status itself, as a warning code (the high bit clear), so that the program that started
     // this one reads the number and not only success or failure.
-    if (g_st)
-        g_st->boot_services->exit(g_image, static_cast<efi_status>(code & 0xff), 0, nullptr);
+    if (g_st) end_program(static_cast<efi_status>(code & 0xff), code);
+    okuefi_board_exit(code);
     for (;;) {}
 }
 
@@ -202,6 +226,8 @@ int kal_memory_info(kal_memory_status* out) {
     return kal_ok;
 }
 
+}  // extern "C"
+
 namespace {
 
 constexpr kal_uintptr kPage = 4096;
@@ -250,23 +276,118 @@ void* aligned_pages(kal_uintptr size, kal_uintptr align) {
          ? reinterpret_cast<void*>(address) : nullptr;
 }
 
+// WHAT THE PROGRAM HOLDS, SO THAT ITS END RETURNS IT (0.13.0). The firmware frees an application's
+// image when it exits and nothing it allocated: the pool and the pages a program obtained stay taken
+// until the machine restarts. A program the firmware or the Shell started ends the session, but one a
+// program started (openkal.process) is followed by its starter, which would find the memory of every
+// program it started still taken --- the C library's allocator reserves its arenas in pages, so a
+// starter ran out after a few starts. Each block of the pool is preceded by its link in a list, each
+// range of pages is a row of a table, and release_memory returns both at the program's end.
+struct block { block* prev; block* next; };
+static_assert(sizeof(block) == 16, "a block's link keeps the pool's alignment of eight");
+block* g_blocks = nullptr;
+
+struct range { unsigned long long at; kal_uintptr pages; bool code; };
+range* g_ranges = nullptr;
+kal_uintptr g_range_count = 0, g_range_cap = 0;
+
+void* linked(void* raw) {
+    auto* b = static_cast<block*>(raw);
+    b->prev = nullptr;
+    b->next = g_blocks;
+    if (g_blocks) g_blocks->prev = b;
+    g_blocks = b;
+    return b + 1;
+}
+
+void unlink(block* b) {
+    if (b->prev) b->prev->next = b->next; else g_blocks = b->next;
+    if (b->next) b->next->prev = b->prev;
+}
+
+// The table grows by doubling, in the pool and outside the list it records.
+bool record(unsigned long long at, kal_uintptr pages, bool code) {
+    if (g_range_count == g_range_cap) {
+        const kal_uintptr cap = g_range_cap ? 2 * g_range_cap : 64;
+        void* p = nullptr;
+        if (g_st->boot_services->allocate_pool(EfiLoaderData, cap * sizeof(range), &p) != EFI_SUCCESS)
+            return false;
+        auto* grown = static_cast<range*>(p);
+        for (kal_uintptr i = 0; i < g_range_count; ++i) grown[i] = g_ranges[i];
+        if (g_ranges) g_st->boot_services->free_pool(g_ranges);
+        g_ranges = grown;
+        g_range_cap = cap;
+    }
+    g_ranges[g_range_count++] = range{at, pages, code};
+    return true;
+}
+
+// The pages recorded at `at', removed from the table; zero where none were.
+kal_uintptr forget(unsigned long long at) {
+    for (kal_uintptr i = 0; i < g_range_count; ++i) {
+        if (g_ranges[i].at != at) continue;
+        const kal_uintptr pages = g_ranges[i].pages;
+        g_ranges[i] = g_ranges[--g_range_count];
+        return pages;
+    }
+    return 0;
+}
+
 }  // namespace
+
+namespace okuefi {
+
+// The pages of a region of code (exec.cpp), recorded as the allocator's are; a range that cannot be
+// recorded is returned at once, and the reservation fails.
+bool pages_taken(unsigned long long at, kal_uintptr pages, bool code) {
+    if (record(at, pages, code)) return true;
+    g_st->boot_services->free_pages(at, pages);
+    return false;
+}
+kal_uintptr pages_returned(unsigned long long at) { return forget(at); }
+
+void release_memory() {
+    if (!g_st) return;
+    auto* bs = g_st->boot_services;
+    for (kal_uintptr i = 0; i < g_range_count; ++i) {
+        if (g_ranges[i].code) exec_unprotect(g_ranges[i].at, g_ranges[i].pages);
+        bs->free_pages(g_ranges[i].at, g_ranges[i].pages);
+    }
+    g_range_count = 0;
+    while (g_blocks) {
+        block* b = g_blocks;
+        g_blocks = b->next;
+        bs->free_pool(b);
+    }
+    if (g_ranges) bs->free_pool(g_ranges);
+    g_ranges = nullptr;
+    g_range_cap = 0;
+}
+
+}  // namespace okuefi
+
+extern "C" {
 
 void* kal_alloc(kal_uintptr size, kal_uintptr align) {
     if (!g_st) return nullptr;
     if (size == 0) size = 1;
-    if (align >= kPage && (align & (align - 1)) == 0) return aligned_pages(size, align);
-    if (align <= 8) {
-        void* p = nullptr;
-        if (g_st->boot_services->allocate_pool(EfiLoaderData, size, &p) != EFI_SUCCESS)
+    if (align >= kPage && (align & (align - 1)) == 0) {
+        void* p = aligned_pages(size, align);
+        if (p && !okuefi::pages_taken(reinterpret_cast<unsigned long long>(p), pages_of(size), false))
             return nullptr;
         return p;
     }
+    if (align <= 8) {
+        void* raw = nullptr;
+        if (g_st->boot_services->allocate_pool(EfiLoaderData, sizeof(block) + size, &raw) != EFI_SUCCESS)
+            return nullptr;
+        return linked(raw);
+    }
     void* raw = nullptr;
-    const kal_uintptr slack = align + sizeof(void*);
+    const kal_uintptr slack = sizeof(block) + align + sizeof(void*);
     if (g_st->boot_services->allocate_pool(EfiLoaderData, size + slack, &raw) != EFI_SUCCESS)
         return nullptr;
-    auto base = reinterpret_cast<kal_uintptr>(raw) + sizeof(void*);
+    auto base = reinterpret_cast<kal_uintptr>(linked(raw)) + sizeof(void*);
     auto aligned = (base + align - 1) & ~(align - 1);
     reinterpret_cast<void**>(aligned)[-1] = raw;
     return reinterpret_cast<void*>(aligned);
@@ -275,10 +396,13 @@ void* kal_alloc(kal_uintptr size, kal_uintptr align) {
 void kal_free(void* p, kal_uintptr size, kal_uintptr align) {
     if (!p || !g_st) return;
     if (align >= kPage && (align & (align - 1)) == 0) {
-        g_st->boot_services->free_pages(reinterpret_cast<unsigned long long>(p), pages_of(size ? size : 1));
+        const auto at = reinterpret_cast<unsigned long long>(p);
+        const kal_uintptr recorded = forget(at);
+        g_st->boot_services->free_pages(at, recorded ? recorded : pages_of(size ? size : 1));
         return;
     }
-    void* raw = align <= 8 ? p : reinterpret_cast<void**>(p)[-1];
+    void* raw = align <= 8 ? static_cast<void*>(static_cast<block*>(p) - 1) : reinterpret_cast<void**>(p)[-1];
+    unlink(static_cast<block*>(raw));
     g_st->boot_services->free_pool(raw);
 }
 
